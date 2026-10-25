@@ -21,9 +21,10 @@ process.env.AGENCY_STATE_DIR = STATE;
 // Short escalation window so the ladder is observable in a test.
 // The production default is 24h per level. Must be set before agency.js loads.
 // The window is 1s, not the smallest workable value: the check reads the board
-// twice, and a read writes to disk (F-17), so the elapsed time is the sleep
-// plus real work. With a 40ms window the level-2 band was 40-79ms and the
-// test missed it by a couple of milliseconds whenever the machine was busy.
+// twice, and the level is derived in memory on read, so the elapsed time
+// between the two reads has to cross the window. With a 40ms window the
+// level-2 band was 40-79ms and the test missed it by a couple of milliseconds
+// whenever the machine was busy.
 process.env.AGENCY_ESCALATION_MS = '1000';
 
 const agency = require(path.join(__dirname, '..', 'agency.js'));

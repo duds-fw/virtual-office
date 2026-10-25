@@ -922,8 +922,7 @@ function escalationStep(level) {
  * A blocker nobody picks up has to reach the PM, then the lead, then the
  * client — so the level is derived from blockedEvery time state is read.
  */
-function refreshEscalationLevels() {
-  const d = load();
+function deriveEscalationLevels(d) {
   const now = Date.now();
   let changed = false;
   for (const e of d.escalations) {
@@ -944,7 +943,18 @@ function refreshEscalationLevels() {
       changed = true;
     }
   }
-  if (changed) save();
+  return changed;
+}
+
+/**
+ * Escalation levels, derived and persisted.
+ *
+ * A read must never write (F-17): the read path calls deriveEscalationLevels
+ * on the in-memory state, and only this write path saves.
+ */
+function refreshEscalationLevels() {
+  const d = load();
+  if (deriveEscalationLevels(d)) save();
   return d.escalations;
 }
 
@@ -978,8 +988,10 @@ function recordEscalation(task, reason) {
 
 // ------------------------------------------------------------------- standups
 
-function standup() {
-  const d = load();
+/**
+ * Today's standup, computed from state. Pure: it writes nothing (F-17).
+ */
+function computeStandup(d) {
   const dayStart = new Date();
   dayStart.setHours(0, 0, 0, 0);
   const since = dayStart.getTime();
@@ -1003,7 +1015,7 @@ function standup() {
     };
   });
 
-  const record = {
+  return {
     date: localDay,
     createdAt: Date.now(),
     agents: perAgent,
@@ -1013,6 +1025,22 @@ function standup() {
       blockers: perAgent.reduce((n, x) => n + x.blockers.length, 0),
     },
   };
+}
+
+/** Today's standup without writing it. This is what a read serves (F-17). */
+function currentStandup() {
+  return computeStandup(load());
+}
+
+/**
+ * Persist today's standup.
+ *
+ * The write path: only an explicit POST records a standup, so reading the
+ * board never rewrites state (F-17).
+ */
+function standup() {
+  const d = load();
+  const record = computeStandup(d);
   const existing = d.standups.find((s) => s.date === record.date);
   if (existing) {
     Object.assign(existing, record);
@@ -1037,7 +1065,9 @@ function standup() {
  */
 function metrics(projectId) {
   const d = load();
-  refreshEscalationLevels();
+  // Derive in memory only: metrics are read by the board, the digest and the
+  // dashboard, and none of them may write (F-17).
+  deriveEscalationLevels(d);
   const now = Date.now();
 
   // Resolve the project this report is about. The active project is the one
@@ -1171,7 +1201,8 @@ function metrics(projectId) {
 
 function state() {
   const d = load();
-  refreshEscalationLevels();
+  // Derive escalation levels in memory only. A read never writes (F-17).
+  deriveEscalationLevels(d);
   return {
     phases: PHASES,
     gates: GATES,
@@ -1187,7 +1218,7 @@ function state() {
     escalations: d.escalations,
     activity: d.activity.slice(0, 50),
     metrics: metrics(),
-    standup: standup(),
+    standup: computeStandup(d),
   };
 }
 
@@ -1504,6 +1535,7 @@ module.exports = {
   state,
   metrics,
   standup,
+  currentStandup,
   workload,
   createProject,
   createSprint,

@@ -351,9 +351,29 @@ async function checkTokenBudget() {
   };
 }
 
+let lastStandupDay = null;
+/**
+ * Record today's standup once a day.
+ *
+ * The read path never writes (F-17), so the office records its own standup
+ * from its own cadence rather than as a side effect of someone reading the
+ * board.
+ */
+function recordDailyStandup() {
+  const today = localDate();
+  if (lastStandupDay === today) return;
+  lastStandupDay = today;
+  try {
+    agency.standup();
+  } catch (e) {
+    console.error('[agency] standup not recorded:', e.message);
+  }
+}
+
 async function runAutonomyTick({ fromQueue = false } = {}) {
   const consumer = fromQueue ? 'queue' : 'ticker';
   resetUsageIfNewDay();
+  recordDailyStandup();
   // The claim is the step: the cap is checked and the counter moved in one
   // synchronous block, so ticks that race cannot both take the last step.
   const claim = claimAutonomyStep(autonomyUsage, consumer, autonomyBudgetConfig());
@@ -1536,7 +1556,14 @@ const server = http.createServer(async (req, res) => {
 
   if (pathname === '/api/agency/standup' && req.method === 'GET') {
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-    return res.end(JSON.stringify(agency.standup()));
+    // A read serves the standup; it does not record one (F-17).
+    return res.end(JSON.stringify(agency.currentStandup()));
+  }
+
+  if (pathname === '/api/agency/standup' && req.method === 'POST') {
+    // The write path: recording a standup is an explicit act.
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    return res.end(JSON.stringify({ ok: true, standup: agency.standup() }));
   }
 
   if (pathname === '/api/agency/workload' && req.method === 'GET') {
