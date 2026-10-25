@@ -50,7 +50,12 @@ const BLOCK_ESCALATION_MS = Number(process.env.AGENCY_ESCALATION_MS) || 24 * 60 
  * Token spend is a resource like hours: a role that has already burned its
  * daily budget is not eligible for more work until the next local day.
  */
-const ROLE_TOKEN_BUDGET = Number(process.env.AGENCY_ROLE_TOKEN_BUDGET) || 2_000_000;
+// The per-role daily token cap. This number is the office's: it decides
+// whether a role may take more work, so it must be the same number the
+// office reports. server.js reads it from here rather than keeping a second
+// copy that could drift apart (it did once: 2,000,000 enforced while
+// 1,000,000 was reported).
+const ROLE_TOKEN_BUDGET = Number(process.env.AGENCY_ROLE_TOKEN_BUDGET) || 1_000_000;
 let roleTokenBudget = ROLE_TOKEN_BUDGET;
 
 /** Runtime-adjustable per-role budget (tunable without a restart). */

@@ -534,7 +534,7 @@ scope to what is already done and record the remainder as a new task. It
 
 ### 6.3 Token discipline
 
-`[shipped]` — Source: `agency.js` `ROLE_TOKEN_BUDGET` (2,000,000 tokens per
+`[shipped]` — Source: `agency.js` `ROLE_TOKEN_BUDGET` (1,000,000 tokens per
 role per local day).
 
 **SOP-6.6** — Token spend is a **capacity** resource, not merely a cost. A
@@ -547,6 +547,15 @@ only by a gate.
 never re-read what it has already read. *Reference: AGENTS.md §"Token
 discipline (strict)"; ISO/IEC 25010:2023 §5 (maintainability) for the
 cost-of-change principle that drives it.*
+
+**SOP-6.8** — A role **MUST** ask the project's knowledge graph before it
+searches. Where `graphify-out/graph.json` exists, a question about the
+codebase, its structure or its history **SHALL** be answered by
+`graphify query` first, and files read only for what the query did not
+answer. A raw transcript or session-history scan is the last resort, not the
+first. A role that finds the graph missing or stale **SHALL** refresh it
+incrementally (`graphify . --update`) rather than fall back to scanning.
+*Reference: AGENTS.md §"Knowledge Recall".*
 
 ---
 
@@ -655,6 +664,15 @@ decision (`SOP-2.2`).
 cause is not understood, an open problem record. A restart is a mitigation, not
 a closure. *Reference: ITIL 4, Problem Management (known error and known
 problem records).*
+
+**SOP-9.4** — The office **SHALL** keep a standing daily check for new
+knowledge that would let it do the same work for fewer tokens. The check is
+booked as ordinary board work (`daily-watch.js`): once per local day, owned by
+IT Infrastructure in the Operations phase, and it **MUST NOT** change the
+office's configuration — a finding is a proposal, and any change to the
+configuration, the routing policy or the budgets is a separate task with its
+own approval. The check **MUST NOT** touch the ticker, the work queue or the
+step counters.
 
 ---
 

@@ -55,8 +55,10 @@ const AUTONOMY = {
   maxStepsPerDay: 12,
   maxTicksPerHour: 4,
   // Per-role daily token budget — the real control. A role that has spent it
-  // is not given more work until the next local day.
-  roleTokenBudget: 1_000_000,
+  // is not given more work until the next local day. The number belongs to
+  // agency.js, because that is where it is enforced; the office reads it
+  // from there instead of keeping a second copy that can drift.
+  roleTokenBudget: agency.getRoleTokenBudget(),
   // Global backstop. Set below the aggregate per-role ceiling (15 working
   // roles x 1M) so it can actually bind — a backstop nothing can reach is not
   // a backstop.

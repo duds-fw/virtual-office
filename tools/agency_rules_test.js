@@ -116,7 +116,10 @@ console.log('--- escalation ladder ---');
   }).then(() => {
     console.log('--- per-role token budget ---');
     const budget = agency.getRoleTokenBudget();
-    check('role budget defaults to 2,000,000', budget === 2_000_000, String(budget));
+    // The owner ratified 1,000,000 per role per local day. The number lives
+    // in agency.js because that is where it is enforced; the test reads it
+    // from there rather than repeating a figure that could drift.
+    check('role budget defaults to the ratified 1,000,000', budget === 1_000_000, String(budget));
 
     // A role with headroom takes work.
     agency.setRoleTokenUsage({ software_engineer: 1000 });

@@ -196,6 +196,26 @@ for (const a of agency.ROSTER) {
 check(`SOP states the token budget ${agency.ROLE_TOKEN_BUDGET.toLocaleString('en-US')}`,
   sop.includes(agency.ROLE_TOKEN_BUDGET.toLocaleString('en-US')) || sop.includes(String(agency.ROLE_TOKEN_BUDGET)));
 
+// The role token budget is one number with three homes: the code that
+// enforces it (agency.js), the code that reports it (server.js) and the
+// ratified document that states it. They drifted once — 2,000,000 enforced
+// while 1,000,000 was reported — and the checker passed, because it compared
+// the document against the number that happened to be enforced. It now
+// compares all three against each other.
+const serverSrc = fs.readFileSync(path.join(ROOT, 'server.js'), 'utf8');
+const agencyDefault = agencySrc.match(/ROLE_TOKEN_BUDGET\s*=\s*Number\(process\.env\.AGENCY_ROLE_TOKEN_BUDGET\)\s*\|\|\s*([\d_]+)/);
+const serverDefault = serverSrc.match(/roleTokenBudget:\s*(?:agency\.getRoleTokenBudget\(\)|([\d_]+))/);
+check('the enforced role token budget is a single number in agency.js', !!agencyDefault);
+check('server.js reads the role token budget from agency.js', !!serverDefault && !serverDefault[1],
+  serverDefault && serverDefault[1] ? `server.js carries its own copy: ${serverDefault[1]}` : '');
+if (agencyDefault) {
+  const enforced = Number(agencyDefault[1].replace(/_/g, ''));
+  check('the enforced role token budget is the one the office ratified', enforced === agency.ROLE_TOKEN_BUDGET,
+    `agency.js ${enforced} vs ratified ${agency.ROLE_TOKEN_BUDGET}`);
+  check('the SOP states the enforced role token budget',
+    sop.includes(enforced.toLocaleString('en-US')) || sop.includes(String(enforced)));
+}
+
 // ---------------------------------------------------------------------------
 console.log('\n== RACI is reproduced from the owner decision ==');
 const raciRows = ['Registration', 'Triage', 'Planning', 'Delivery', 'Acceptance', 'Done'];
