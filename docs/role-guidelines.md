@@ -664,7 +664,7 @@ The Data Analyst **MUST NOT** define a metric to report on its own work, and
 
 ### R-06 · UI/UX — `ui_ux_designer`
 
-**Roster:** capacity 32 h/sprint · Design · subagent `documenter`.
+**Roster:** capacity 32 h/sprint · Design · subagent `frontend`.
 
 #### 1. Purpose
 Produce designs that are usable, accessible, and buildable — and approve the
@@ -869,7 +869,7 @@ The Software Engineer **MUST NOT** approve the gate on its own code and
 
 ### R-08 · Database Eng — `database_engineer`
 
-**Roster:** capacity 32 h/sprint · Design, Development · subagent `general`.
+**Roster:** capacity 32 h/sprint · Design, Development · subagent `database-engineer`.
 
 #### 1. Purpose
 Own the data model — schema, migrations, integrity constraints, and query
