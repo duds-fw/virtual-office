@@ -91,8 +91,29 @@ without asking whether they were the intended answers — they were.
   genuine strategic forks — different business outcomes — not for a decision
   with a defensible answer. Decide, record the reasoning, and carry it.
 
-## Version control (standing rule)
-This project is under git. It was not, and that was a defect in the office's
+## Procedure (draft — not yet in force)
+The office's Standard Operating Procedure is drafted at
+`docs/sop-virtual-office.md` and the per-role guidelines at
+`docs/role-guidelines.md`. **Both are drafts awaiting the owner's review.**
+Until they are ratified they do not override this file, `docs/agency-decisions.md`,
+or the code.
+
+- **The code wins.** `agency.js` is the mechanism; `docs/agency-decisions.md` is
+  the authority; the SOP is the procedure; the role guidelines are role detail.
+  A conflict escalates at L2 (Orchestrator); a conflict that would change an
+  owner decision escalates to the owner.
+- **Read the clause for your role.** Your role's section names the SOP clauses
+  that bind you. When a task touches one of those areas, the clause is the
+  procedure you follow.
+- **If a clause looks wrong, say so and keep working.** The owner reviews these
+  drafts. A role that finds an unworkable clause records the objection in the
+  task and raises it — it does not silently ignore the clause, and it does not
+  stop the work waiting for the answer.
+- **Standards are references, not claims.** The office is not certified to any
+  standard. Never describe the office, its work, or a role's output as
+  "ISO compliant", "certified", or "audit-ready".
+
+## Version control (standing rule)This project is under git. It was not, and that was a defect in the office's
 own operating standard, not in anyone's judgement.
 
 - **Every code change is committed locally before the task leaves

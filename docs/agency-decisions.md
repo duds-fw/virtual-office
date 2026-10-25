@@ -214,3 +214,102 @@ were the intended answers. If the implementation hits a genuine fork — one whe
 the choices have different business outcomes — it escalates through
 `POST /api/client/decision` with the question, the context, and concrete
 options.
+
+## D8 — Proposal: the Virtual Office SOP and role guidelines (awaiting owner review)
+
+Recorded 2026-10-25. The owner asked for a Standard Operating Procedure for the
+Virtual Company and a guideline for each role/department, on international
+best-practice footing, to review and apply on approval. Two drafts are on disk:
+
+- `docs/sop-virtual-office.md` — the company SOP. 19 sections, every normative
+  clause carrying a stable id (`SOP-x.y`), a `[shipped]` / `[designed]` /
+  `[proposed]` marker on each area, and an explicit standards-mapping table.
+- `docs/role-guidelines.md` — the per-role guidelines. 17 roles in 7
+  departments, each on the same 13-heading template: purpose, scope, phase
+  eligibility, accountabilities, standard operating procedure, inputs/outputs,
+  decision rights, gates, KPIs, escalation triggers, standard of work,
+  standards reference, conflict-of-interest rule.
+
+**These are drafts. They are not in force.** The SOP says so in its header and
+in §19, the guidelines say so in their header and in §11, and the owner has not
+signed either. Until ratification, `AGENTS.md` and the owner decisions in this
+file remain the operative authority.
+
+### D8.1 — Standards used as design references, not as a compliance claim
+
+The owner asked for "the best practice based on international licensed". The
+honest reading is *international standards and licensed frameworks*, and the
+office uses them that way — for structure, control themes and practice
+definitions — **not** as a compliance programme.
+
+Anchored to: ISO 9001:2015, ISO/IEC 27001:2022 Annex A, ISO/IEC 42001:2021,
+ISO/IEC 25010:2023, ISO/IEC 20000-1, NIST SP 800-53 Rev. 5, NIST SP 800-61
+Rev. 3, NIST AI RMF 1.0, OWASP ASVS V4, OWASP Top 10, ITIL 4, COBIT 2019,
+Scrum Guide 2020, PMBOK 7, RFC 2119, RFC 9110, WCAG 2.2, CIS Controls v8.
+
+**The office is not certified to any standard** and no clause may be presented
+as evidence of conformity. SOP §17 states this explicitly, names the standards
+that are *not* claimed, and lists what a real audit would find — including that
+no independent audit has been performed and that no conformity evidence exists.
+Frameworks whose subject matter does not exist here (ISO 13485, HIPAA, PCI DSS,
+IEC 62443, ISO/IEC 27017/27018, TOGAF) were deliberately excluded, and the
+exclusion is stated so the reader knows the selection was deliberate.
+
+### D8.2 — The largest hazard: designed vs shipped
+
+The 6-stage project pipeline ratified in D7 is **designed, not implemented**.
+`agency.js` still creates projects with `status: 'active'`; there is no
+`acceptanceCriteria`, no `task.deliverable`, no `verify`/`ratify` endpoint. An
+SOP that described the pipeline as live would contradict the running code, and
+an agent following it would look for controls that do not exist.
+
+Every affected clause therefore carries a status marker:
+`[shipped]` (enforced by code today, with the symbol named), `[designed]`
+(spec'd but unimplemented, with the design doc named), `[proposed]` (new in the
+SOP, neither code nor owner decision yet).
+
+The same honesty applies to security. The `security_signoff` gate has **never
+been approved** and the Deployment gate is **closed** — F-01 (no authentication
+on state-mutating routes), F-06 (owner-channel takeover) and F-07
+(owner-decision forgery) remain open. SOP §4.6 states this, and forbids the
+office from describing a Deployment path as available while it holds.
+
+### D8.3 — Precedence, and a mechanical guard against drift
+
+Two documents describing a moving system will drift. SOP §15.4 fixes the
+precedence order: `agency.js` (mechanism) > `docs/agency-decisions.md`
+(authority) > the SOP (procedure) > the role guidelines (role detail) >
+`AGENTS.md` (working rules). A lower-ranked document must not override a
+higher-ranked one.
+
+`tools/sop-consistency-check.js` makes that enforceable rather than aspirational.
+It reads the real values out of `agency.js` and asserts the documents match —
+145 checks covering the roster, phase eligibility, status vocabulary, gate ids
+and approvers, escalation levels, per-role capacity, the token budget, clause
+cross-references, invariant definitions, and a scan for false compliance claims.
+It was validated by mutation: eight deliberate corruptions (a role claiming a
+phase the code forbids, a false compliance claim, a bogus gate id, a wrong
+capacity, a broken clause citation, a deleted role section, an invented
+escalation level, a removed invariant) were each caught.
+
+The check is a **draft-time control**. Wiring it into the office's regression
+gate is part of the ratification task on the board.
+
+### D8.4 — What the SOP deliberately does not do
+
+- It does not write the employees' reasoning. It prescribes **outputs and
+  evidence**, not how a role should think — consistent with D7.2's rule that a
+  defensible engineering answer belongs to the employee.
+- It does not invent targets. Every KPI names the board field it reads, and no
+  numeric target is published that the board cannot derive (SOP-9.2).
+- It does not invent a governance apparatus the office does not have — no
+  change advisory board, no CMDB, no conformity assessment.
+- It does not restate shared procedures 17 times. Departments 6 and 7 are
+  shared-subagent departments: one procedure, role-specific overlays.
+
+### Standing rule
+
+Until the owner ratifies, nothing in either document overrides `AGENTS.md` or
+the decisions in this file. On ratification, the SOP and the guidelines become
+the office's procedure, the owner decision is recorded here as the ratification
+entry, and the signature sheets are completed.
