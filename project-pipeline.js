@@ -153,14 +153,22 @@ function validateChecklist(criteria) {
   return { ok: true, reason: null, errors: [] };
 }
 
-/** Normalise a criterion into the canonical stored shape. */
+/**
+ * Normalise a criterion into the canonical stored shape.
+ *
+ * The verdict fields (`met`, `metBy`, `evidence`) are deliberately NOT taken
+ * from the caller. A checklist is a plan of what will be checked; the verdict
+ * is reached separately by `verifyCriterion`, which enforces the evidence rule.
+ * Honouring a caller-supplied `met: true` here would make the checklist a
+ * self-asserted verdict and collapse the two acts of acceptance into one.
+ */
 function normaliseCriterion(raw, index) {
   return {
     id: raw.id || `ac_${index + 1}`,
     text: String(raw.text || '').trim(),
-    met: raw.met === true,
-    metBy: Array.isArray(raw.metBy) ? raw.metBy.filter((x) => typeof x === 'string' && x) : [],
-    evidence: raw.evidence === undefined || raw.evidence === null ? null : raw.evidence,
+    met: false,
+    metBy: [],
+    evidence: null,
   };
 }
 
@@ -205,7 +213,10 @@ function checkDoneGates(project, tasksById) {
       const t = (tasksById || {})[tid];
       if (!t) { errors.push(`criterion ${c.id} references unknown task ${tid}`); continue; }
       if (t.status !== 'done') errors.push(`criterion ${c.id} references task ${tid} which is not done`);
-      if (project.projectId && t.projectId && t.projectId !== project.projectId) {
+      // The task must belong to THIS project. A project record carries `id`,
+      // not `projectId` — testing `project.projectId` here compared against
+      // undefined and let another project's work satisfy the gate.
+      if (project.id && t.projectId && t.projectId !== project.id) {
         errors.push(`criterion ${c.id} references task ${tid} from another project`);
       }
     }

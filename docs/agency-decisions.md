@@ -433,3 +433,117 @@ and §11A change from `[designed]` to `[shipped]` with the implementing symbols
 named, and the consistency checker's assertions move from *document-shape* to
 *code-and-document agreement*. A procedure clause that no code enforces stays
 `[designed]`.
+
+---
+
+## D9 — Separation of the Office Engine and the Office UI → **The engine is the actor. The UI is the observer and the owner.**
+
+Owner direction, 2026-10-25: the office UI is a monitoring console over the
+office engine, and the engine is an autonomous agent working on the owner's
+behalf. The Orchestrator's execution-level decisions inside that direction are
+recorded here and carry without further escalation.
+
+### D9.1 — The UI observes everything and acts on a named, small set of owner acts
+
+The UI is not a read-only mirror. The owner must be able to act from it —
+answer a decision, grant acceptance or ratification, resolve an escalation. An
+office you can only watch is not runnable.
+
+What the UI must **not** do is drive the engine's *work*. Task lifecycle,
+gate approval, assignment and delegation stay on the engine's internal command
+channel. The owner's browser is a privileged surface, not an operator's console
+for the internals.
+
+### D9.2 — Three channels, not two
+
+| Channel | Direction | Carries |
+|---|---|---|
+| **Telemetry** | engine → UI | activity journal, read-model snapshot, live stream |
+| **Engine command** | engine internals → engine | task lifecycle, gates, assignment, delegation |
+| **Owner decision** | UI → engine | the named owner acts from D9.1, plus a status/board nudge |
+
+The owner UI and the engine's internal agents must not share a write API. Today
+`public/index.html:660` calls `POST /api/agency/task/:id/status` — the same
+route the agents use — so the console and any drive-by web page hold the same
+trust level. That is the root of F-01, F-02 and F-07, not a side effect of it.
+
+### D9.3 — The engine writes an authoritative activity journal; the UI reads it
+
+The engine records what it did. The UI does not reconstruct it.
+
+Today the activity feed is scraped: `server.js:523 fetchSessionMessages()` →
+`server.js:493 extractDelegations()` → `server.js:469 mergeDelegations()` →
+`public/index.html:444 liveDelegations`. That is a lossy projection of engine
+activity, reconstructed after the fact from the agent's chat transcript. It is
+also the live injection path: caller text reaches a prompt (F-04, F-05), the
+agent's reply is scraped back, and it is interpolated raw into the console
+(F-15, F-16). **The monitoring surface is the injection surface.**
+
+The journal is append-only and on disk, separate from `state/agency.json`
+(which the server owns and rewrites in memory). Every board change *and* every
+agent lifecycle event — delegation opened and closed, subagent spawned and
+reaped, provider unhealthy, budget exhausted — is written by the engine at the
+moment it happens. The scraped-transcript path is retired, not supplemented.
+
+### D9.4 — Both owner channels stay; the engine's decision record is the authority
+
+There is no winner between the web console and the owner chat channel. Both
+present the same decision objects and both post to the same engine method
+(`agency.answerDecision`), so they cannot structurally disagree — and the
+owner may answer from a phone or a desk.
+
+The defect is not two channels, it is attribution: `answeredBy` is taken from
+the request body (F-07). Identity comes from the authenticated session. The
+engine records `answeredBy` = the authenticated owner identity and
+`answeredVia` ∈ {`console`, `chat`} for audit.
+
+### D9.5 — The UI stays served by the same process; the contract is written network-shaped
+
+"Not static" means the UI needs a live connection, not a separate process. The
+UI's static assets continue to be served by the office server.
+
+The contract is nonetheless written as if it were a service — HTTP only, a
+versioned read-model, a push channel — so that moving the UI behind nginx
+later is a deployment change and not a code change.
+
+This is the deliberate answer to the obvious counter-argument. Splitting the UI
+onto its own origin would shrink the blast radius of the `0.0.0.0` bind and the
+wildcard CORS (F-01). But it would also put the engine behind a network hop
+that the owner's browser must reach, with CORS and a browser-held credential to
+authenticate — a larger security surface today, for a benefit that only becomes
+real once F-01 is closed on the engine's own boundary. Close F-01 at the engine
+(bind `127.0.0.1`, shared-secret header, origin allowlist) and the UI can be
+relocated later without touching the contract.
+
+### D9.6 — The read path is pure
+
+A monitor that writes is not a monitor. `GET /api/agency/state` currently
+mutates and persists on every read: `agency.js:981 standup()` writes to
+`d.standups` and saves, and `refreshEscalationLevels()` saves again (F-17).
+Under D9 the read path computes and returns; persistence happens only from an
+explicit write.
+
+This also keeps the monitor off the same event loop as `runAutonomyTick` and the
+OpenCode CLI spawn — a console that blocks behind the engine's own work cannot
+report on it.
+
+### What this does not change
+
+The pipeline remains **designed, not shipped**. Nothing in D9 implements the
+stage endpoints, the acceptance checklist or the pipeline UI; D9 fixes the
+seam those land on, and D9's own scope is stated in the board tasks it
+creates.
+
+D9 does not close F-01, F-02, F-06 or F-07 either. It defines where each is
+closed: F-01 and F-06 at the engine's boundary, F-02 and F-07 on the owner
+decision channel.
+
+### Standing rule (added)
+
+The UI holds no domain vocabulary. The task-status list, the phase list, the
+project stages, the gate ids and the roster roles are **served by the engine**
+(`GET /api/agency/vocabulary`), never hardcoded in the client. The UI may map
+semantic state to pixels — that is presentation — but it may not own the list.
+`public/index.html` currently hardcodes the task-status map at line 717 and the
+phase-to-room map at lines 260, 317 and 339, with lines 317 and 339 holding the
+same map twice.

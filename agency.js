@@ -479,6 +479,11 @@ function setAcceptanceCriteria(projectId, criteria) {
  *
  * `met` may only be set true when evidence is supplied (design doc §5:
  * `verify` is refused with `criterion_unverified` if evidence is absent).
+ *
+ * The evidence must be a non-blank string of bounded length. The referenced
+ * tasks must be this project's own tasks — another project's completed work is
+ * not evidence for this project. A criterion, once verified, is frozen: the
+ * verdict that was checked cannot later be re-pointed at different evidence.
  */
 function verifyCriterion(projectId, criterionId, met, evidence, opts = {}) {
   const d = load();
@@ -486,12 +491,71 @@ function verifyCriterion(projectId, criterionId, met, evidence, opts = {}) {
   if (!project) return { ok: false, reason: 'project_not_registered', errors: [`unknown project ${projectId}`] };
   const c = (project.acceptanceCriteria || []).find((x) => x.id === criterionId);
   if (!c) return { ok: false, reason: 'criterion_unverified', errors: [`unknown criterion ${criterionId}`] };
-  if (met === true && !evidence) {
-    return { ok: false, reason: 'criterion_unverified', errors: [`criterion ${criterionId} cannot be marked met without evidence`] };
+
+  // A verdict cannot be changed once the project has been accepted: the
+  // acceptance was granted on the evidence as it stood.
+  if (project.status === 'acceptance' || project.status === 'done') {
+    return {
+      ok: false,
+      reason: 'criterion_frozen',
+      errors: [`criterion ${criterionId} cannot be re-verified after the project entered ${project.status}`],
+    };
   }
+  // A verified criterion is frozen. Un-verifying (marking it unmet again) is
+  // allowed — that is the honest thing to do when the evidence turns out to be
+  // wrong — but re-pointing a met criterion at different evidence is not.
+  if (c.met === true && c.verifiedAt && met === true) {
+    return {
+      ok: false,
+      reason: 'criterion_frozen',
+      errors: [`criterion ${criterionId} is already verified; request a change to the project instead`],
+    };
+  }
+
+  if (met === true) {
+    if (typeof evidence !== 'string' || !evidence.trim()) {
+      return {
+        ok: false,
+        reason: 'criterion_unverified',
+        errors: [`criterion ${criterionId} cannot be marked met without evidence`],
+      };
+    }
+    if (evidence.length > 2000) {
+      return {
+        ok: false,
+        reason: 'criterion_unverified',
+        errors: [`criterion ${criterionId} evidence is too long`],
+      };
+    }
+  }
+
+  // The referenced tasks must exist and belong to this project.
+  let metBy = [];
+  if (Array.isArray(opts.metBy)) {
+    metBy = opts.metBy.filter((x) => typeof x === 'string' && x);
+    const own = d.tasks.filter((t) => t.projectId === project.id);
+    const ownIds = new Set(own.map((t) => t.id));
+    for (const tid of metBy) {
+      if (!ownIds.has(tid)) {
+        return {
+          ok: false,
+          reason: 'criterion_unverified',
+          errors: [`criterion ${criterionId} references task ${tid}, which is not one of this project's tasks`],
+        };
+      }
+    }
+  }
+
   c.met = met === true;
-  c.evidence = evidence === undefined || evidence === null ? null : evidence;
-  if (Array.isArray(opts.metBy)) c.metBy = opts.metBy.filter((x) => typeof x === 'string' && x);
+  c.evidence = met === true ? evidence.trim() : (evidence === undefined || evidence === null ? null : evidence);
+  c.metBy = metBy;
+  if (met === true) {
+    c.verifiedAt = Date.now();
+    c.verifiedBy = Array.isArray(opts.verifiedBy) ? opts.verifiedBy.filter((x) => typeof x === 'string' && x) : [];
+  } else {
+    c.verifiedAt = null;
+    c.verifiedBy = [];
+  }
   save();
   return { ok: true, project, criterion: c };
 }
