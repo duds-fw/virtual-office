@@ -381,6 +381,28 @@ console.log('--- escalation ladder ---');
     const good = agency.assignTask(owner.id, 'qa');
     check('an eligible agent is assigned',
       good.ok === true && good.agentId === 'qa', JSON.stringify(good));
+
+    // A role change hands the task to a different kind of owner: the previous
+    // owner no longer carries the task's role (F-20), so the task returns to
+    // the unassigned pool instead of keeping an ineligible owner.
+    const rcTask = agency.createTask({ title: 'Role change', phase: 'Development', role: 'software_engineer', estimateHours: 2 });
+    const rcBadRole = agency.updateTask(rcTask.id, { role: 'not_a_role' });
+    check('an unknown role is refused',
+      rcBadRole.ok === false && rcBadRole.reason === 'invalid_role', JSON.stringify(rcBadRole));
+    const rcWrongPhaseRole = agency.updateTask(rcTask.id, { role: 'ui_ux_designer' });
+    check('a role that does not work the phase is refused',
+      rcWrongPhaseRole.ok === false && rcWrongPhaseRole.reason === 'role_not_eligible', JSON.stringify(rcWrongPhaseRole));
+    const rcChanged = agency.updateTask(rcTask.id, { role: 'database_engineer' });
+    check('a role change is applied',
+      rcChanged.ok === true && rcChanged.task && rcChanged.task.role === 'database_engineer', JSON.stringify(rcChanged.task || rcChanged));
+    check('a role change clears the ineligible owner',
+      rcChanged.ok === true && rcChanged.task && !rcChanged.task.ownerId, JSON.stringify(rcChanged.task || rcChanged));
+    const rcStaleOwner = agency.assignTask(rcTask.id, 'se');
+    check('the previous owner is refused after a role change',
+      rcStaleOwner.ok === false && rcStaleOwner.reason === 'ineligible_agent', JSON.stringify(rcStaleOwner));
+    const rcNewOwner = agency.assignTask(rcTask.id, 'de');
+    check('an owner carrying the new role is assigned',
+      rcNewOwner.ok === true && rcNewOwner.agentId === 'de', JSON.stringify(rcNewOwner));
   }).then(() => {
     console.log('--- metrics derive from real task data ---');
     const m = agency.metrics();
