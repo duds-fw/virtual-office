@@ -110,6 +110,7 @@ async function probeCandidate(c, { deadline = 0 } = {}) {
     c.lastChecked = now();
     c.lastError = created.error || 'session create failed';
     c.failures++;
+    noteRefusal(c.key, created.error || '');
     return c;
   }
   const sessionID = created.json.data.id;
@@ -136,7 +137,7 @@ async function probeCandidate(c, { deadline = 0 } = {}) {
       c.lastChecked = now();
       c.lastError = msg.slice(0, 200);
       c.failures++;
-      if (isQuotaError(msg)) c.exhaustedUntil = now() + COOLDOWN_MS;
+      noteRefusal(c.key, msg);
       return c;
     }
     const text = (assistant.content || []).filter((x) => x.type === 'text').map((x) => x.text).join(' ');
@@ -153,6 +154,26 @@ async function probeCandidate(c, { deadline = 0 } = {}) {
   c.lastError = 'no response in time';
   c.failures++;
   return c;
+}
+
+/**
+ * Record a provider-level refusal.
+ *
+ * The quota belongs to the account, not to the model: one model answering
+ * "usage limit reached" means every model on that provider is spent.
+ * Tracking it per model left the office probing seven dead free models, one
+ * per tick, while a working paid route sat unused behind them.
+ *
+ * Returns true when the refusal was a quota refusal.
+ */
+function noteRefusal(key, message) {
+  const c = candidate(key);
+  if (!c || !isQuotaError(message)) return false;
+  const until = now() + COOLDOWN_MS;
+  for (const x of state.candidates) {
+    if (x.providerID === c.providerID && x.exhaustedUntil < until) x.exhaustedUntil = until;
+  }
+  return true;
 }
 
 /**
@@ -326,6 +347,7 @@ module.exports = {
   MODEL_POLICY,
   COOLDOWN_MS,
   HEALTH_TTL_MS,
+  noteRefusal,
   PROBE_TOTAL_BUDGET_MS,
   selectModel,
   currentModel,

@@ -131,6 +131,37 @@ function prober(table) {
       `${router.HEALTH_TTL_MS} vs ${router.PROBE_TOTAL_BUDGET_MS}`);
   }
 
+  console.log('--- a quota refusal exhausts the provider, not just the model ---');
+  {
+    router.resetState();
+    const provider = FREE_KEY.split('/')[0];
+    const refused = router.noteRefusal(FREE_KEY, 'Free usage limit reached. Connect a provider to keep going.');
+    check('a quota refusal is recognised', refused === true);
+    const st = router.status();
+    const sameProvider = st.candidates.filter((c) => c.key.split('/')[0] === provider);
+    check('every model on that provider is exhausted', sameProvider.length > 1 && sameProvider.every((c) => c.exhausted),
+      JSON.stringify(sameProvider.map((c) => c.key + ':' + c.exhausted)));
+    const other = st.candidates.filter((c) => c.key.split('/')[0] !== provider);
+    check('the other provider is not exhausted', other.every((c) => !c.exhausted),
+      JSON.stringify(other.map((c) => c.key + ':' + c.exhausted)));
+    const p = prober({ [PAID_KEY]: { healthy: true } });
+    const m = await router.selectModel({ probeFn: p });
+    check('the dead provider is not probed', !p.calls.some((k) => k.split('/')[0] === provider), p.calls.join(','));
+    check('the office falls through to the route that can serve', !!m && m.key === PAID_KEY, JSON.stringify(m));
+  }
+
+  console.log('--- a refusal that is not about quota does not exhaust the provider ---');
+  {
+    router.resetState();
+    const provider = FREE_KEY.split('/')[0];
+    const refused = router.noteRefusal(FREE_KEY, 'no response in time');
+    check('a non-quota refusal is not a quota refusal', refused === false);
+    const st = router.status();
+    const sameProvider = st.candidates.filter((c) => c.key.split('/')[0] === provider);
+    check('the provider is not exhausted by it', sameProvider.every((c) => !c.exhausted),
+      JSON.stringify(sameProvider.map((c) => c.key + ':' + c.exhausted)));
+  }
+
   console.log('--- the policy is the hierarchy the office documents ---');
   {
     check('there is a free tier', FREE.length > 0);
