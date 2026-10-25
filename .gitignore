@@ -1,0 +1,19 @@
+# Live office state — the server owns this and rewrites it in memory.
+# Never commit it: it changes on every tick and would drown real history in noise.
+state/
+
+# Credentials and local secrets.
+state/client.json
+*.env
+.env
+.pat-git.txt
+
+# Tooling state
+.database-mcp/
+node_modules/
+__pycache__/
+*.pyc
+
+# OS noise
+.DS_Store
+Thumbs.db

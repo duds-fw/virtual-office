@@ -1,0 +1,1260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>duDDev Virtual Office</title>
+<style>
+  :root {
+    --bg:#0a0f1e; --panel:rgba(15,23,42,0.78); --accent:#38bdf8;
+    --ok:#22c55e; --warn:#f59e0b; --danger:#ef4444; --text:#f1f5f9; --muted:#94a3b8;
+    --border:rgba(148,163,184,0.18);
+  }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  html,body { height:100%; background:var(--bg); color:var(--text);
+    font-family:'Inter',system-ui,sans-serif; overflow:hidden; }
+  .app { display:grid; grid-template-rows:52px 1fr 120px; height:100vh; gap:8px; padding:8px; }
+  header { display:flex; align-items:center; justify-content:space-between;
+    background:var(--panel); border:1px solid var(--border); border-radius:12px;
+    padding:0 16px; backdrop-filter:blur(10px); }
+  header .brand { font-weight:700; font-size:15px; display:flex; align-items:center; gap:10px; }
+  header .brand .dot { width:9px; height:9px; border-radius:50%; background:var(--ok);
+    box-shadow:0 0 8px var(--ok); animation:pulse 1.6s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+  header .meta { display:flex; gap:14px; font-size:12px; color:var(--muted); }
+  header .meta b { color:var(--text); }
+
+  .scene-wrap { position:relative; background:linear-gradient(180deg,#0b1224,#0a0f1e);
+    border:1px solid var(--border); border-radius:12px; overflow:hidden; min-height:0; }
+  #scene { width:100%; height:100%; display:block; }
+  .overlay { position:absolute; top:10px; left:10px; display:flex; gap:8px; z-index:2; flex-wrap:wrap; }
+  .stat { background:rgba(15,23,42,0.75); border:1px solid var(--border); border-radius:8px;
+    padding:5px 10px; font-size:11px; backdrop-filter:blur(6px); }
+  .stat b { color:var(--accent); }
+  .hint { position:absolute; bottom:10px; right:10px; font-size:10px; color:var(--muted);
+    background:rgba(15,23,42,0.6); border:1px solid var(--border); border-radius:6px;
+    padding:4px 8px; z-index:2; }
+
+  .bottom { display:grid; grid-template-columns:260px 1fr; gap:8px; min-height:0; }
+  .panel { background:var(--panel); border:1px solid var(--border); border-radius:12px;
+    overflow:hidden; display:flex; flex-direction:column; backdrop-filter:blur(10px); min-height:0; }
+  .panel h3 { margin:0; padding:8px 12px; font-size:10px; text-transform:uppercase;
+    letter-spacing:.1em; color:var(--muted); border-bottom:1px solid var(--border);
+    background:rgba(15,23,42,0.5); display:flex; justify-content:space-between; align-items:center; }
+  .panel .body { padding:8px 10px; overflow:auto; flex:1; min-height:0; }
+
+  .agent { display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:8px;
+    background:rgba(15,23,42,0.5); margin-bottom:4px; border:1px solid var(--border); }
+  .agent .av { width:26px; height:26px; border-radius:6px; display:grid; place-items:center;
+    font-weight:700; font-size:10px; color:#0b1220; flex-shrink:0; }
+  .agent .info { flex:1; min-width:0; }
+  .agent .name { font-size:12px; font-weight:600; }
+  .agent .role { font-size:10px; color:var(--muted); }
+  .agent .status { font-size:10px; margin-top:1px; display:flex; align-items:center; gap:4px; }
+  .agent .status .s-dot { width:6px; height:6px; border-radius:50%; }
+  .st-working .s-dot { background:var(--ok); box-shadow:0 0 5px var(--ok); }
+  .st-idle .s-dot { background:#475569; }
+  .st-blocked .s-dot { background:var(--danger); }
+  .st-review .s-dot { background:var(--warn); }
+
+  .feed { font-family:'JetBrains Mono',ui-monospace,monospace; font-size:10px; line-height:1.5; }
+  .feed .line { padding:4px 0; border-bottom:1px dashed rgba(148,163,184,0.12);
+    display:grid; grid-template-columns:52px 1fr; gap:6px; }
+  .feed .time { color:var(--muted); font-size:9px; }
+  .feed .agent { color:var(--accent); font-weight:600; }
+  .feed .action { color:var(--text); }
+  .popup { position:fixed; top:60px; right:12px; width:320px; max-height:80vh; background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:12px; overflow:auto; z-index:100; display:none; backdrop-filter:blur(16px); box-shadow:0 20px 40px rgba(0,0,0,0.5); }
+  .popup.active { display:block; animation:fadeIn .2s ease; }
+  @keyframes fadeIn { from{opacity:0;transform:translateY(-6px)} to{opacity:1;transform:translateY(0)} }
+  .popup .agent { background:var(--panel2); border:1px solid var(--border); border-radius:8px; padding:6px; margin-bottom:4px; }
+  .popup h3 { font-size:11px; text-transform:uppercase; color:var(--muted); border-bottom:1px solid var(--border); padding:8px 0; margin-bottom:6px; }
+
+  /* ---- agency panels: sprint board / workload / delivery metrics ---- */
+  .muted-note { font-size:10px; color:var(--muted); padding:3px 0; }
+  .board-head { display:flex; justify-content:space-between; align-items:baseline; gap:8px; margin-bottom:4px; }
+  .board-head .sprint { font-size:10px; font-weight:600; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .board-head .days { font-size:9px; color:var(--muted); white-space:nowrap; }
+  .board-phase { font-size:9px; text-transform:uppercase; letter-spacing:.09em; color:var(--accent); margin:7px 0 3px; }
+  .task { background:rgba(15,23,42,0.5); border:1px solid var(--border); border-radius:6px; padding:5px 6px; margin-bottom:4px; }
+  .task .t-head { display:flex; justify-content:space-between; align-items:flex-start; gap:6px; }
+  .task .t-title { font-size:10px; color:var(--text); line-height:1.3; }
+  .task .t-meta { display:flex; gap:8px; font-size:9px; color:var(--muted); margin-top:2px; }
+  .task .t-blocked { font-size:9px; color:var(--danger); margin-top:3px; }
+  .pill { font-size:8px; text-transform:uppercase; letter-spacing:.06em; padding:1px 5px; border-radius:99px;
+    border:1px solid var(--border); color:var(--muted); white-space:nowrap; }
+  .pill-ready { color:#93c5fd; border-color:rgba(147,197,253,.35); }
+  .pill-in_progress { color:var(--warn); border-color:rgba(245,158,11,.35); }
+  .pill-review { color:#c4b5fd; border-color:rgba(196,181,253,.35); }
+  .pill-blocked { color:var(--danger); border-color:rgba(239,68,68,.45); }
+  .pill-done { color:var(--ok); border-color:rgba(34,197,94,.35); }
+  .wl-top { font-size:10px; color:var(--muted); margin-bottom:4px; }
+  .wl-top b { color:var(--text); }
+  .wl-row { padding:4px 0; border-bottom:1px dashed rgba(148,163,184,.12); }
+  .wl-line { display:flex; align-items:baseline; gap:6px; font-size:10px; }
+  .wl-line .wl-name { color:var(--text); flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .wl-line .wl-load { color:var(--muted); font-size:9px; }
+  .wl-line .wl-flag { color:var(--danger); font-size:8px; text-transform:uppercase; letter-spacing:.06em; }
+  .wl-bar { height:5px; margin-top:3px; border-radius:99px; background:rgba(148,163,184,.14); overflow:hidden; }
+  .wl-fill { height:100%; background:var(--accent); border-radius:99px; }
+  .wl-fill.over { background:var(--danger); }
+  .tile-grid { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+  .tile { background:rgba(15,23,42,0.5); border:1px solid var(--border); border-radius:8px; padding:5px 7px; }
+  .tile .tile-label { font-size:8px; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); }
+  .tile .tile-value { font-size:13px; font-weight:700; color:var(--text); line-height:1.25; }
+  .tile .tile-sub { font-size:8px; color:var(--muted); }
+  .token-budget { margin-top:8px; display:grid; gap:4px; }
+  .token-row { display:grid; grid-template-columns:104px 1fr 44px; gap:6px; align-items:center; }
+  .token-role { font-size:9px; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .token-bar { height:7px; background:rgba(15,23,42,0.6); border:1px solid var(--border); border-radius:4px; overflow:hidden; }
+  .token-fill { height:100%; background:linear-gradient(90deg,#0ea5e9,#38bdf8); }
+  .token-val { font-size:9px; color:var(--muted); text-align:right; }
+  .decision { background:rgba(15,23,42,0.5); border:1px solid var(--border); border-left:2px solid var(--accent); border-radius:8px; padding:6px 8px; margin-bottom:6px; display:grid; gap:4px; }
+  .decision-q { font-size:10px; color:var(--text); font-weight:600; line-height:1.35; }
+  .decision-opts { display:flex; flex-wrap:wrap; gap:5px; margin-top:2px; }
+  .decision-opt { background:#0ea5e9; color:#06233a; border:none; border-radius:6px; padding:4px 8px; font-size:9px; font-weight:700; cursor:pointer; font-family:inherit; }
+  .decision-opt:disabled { opacity:.5; cursor:default; }
+
+  /* ---- escalation panel (level · owner · age) ---- */
+  .esc-row { padding-left:6px; border-left:2px solid transparent; }
+  .esc-row.lv1 { border-left-color:var(--accent); }
+  .esc-row.lv2 { border-left-color:var(--warn); }
+  .esc-row.lv3 { border-left-color:var(--danger); }
+  .esc-chip { font-size:8px; text-transform:uppercase; letter-spacing:.06em; padding:1px 5px; border-radius:99px;
+    border:1px solid var(--border); color:var(--muted); white-space:nowrap; flex-shrink:0; }
+  .esc-l1 { color:var(--accent); border-color:var(--accent); }
+  .esc-l2 { color:var(--warn); border-color:var(--warn); }
+  .esc-l3 { color:var(--danger); border-color:var(--danger); }
+  .esc-head .esc-title { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text); }
+  .esc-head .esc-owner { color:var(--text); white-space:nowrap; flex-shrink:0; }
+  .esc-sub { font-size:9px; }
+  .esc-sub .esc-reason { color:var(--text); min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .esc-sub .esc-meta { color:var(--muted); min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .esc-sub .esc-sep { color:var(--muted); white-space:nowrap; flex-shrink:0; }
+  .esc-sub .esc-age { flex-shrink:0; }
+  .esc-resolved { opacity:.6; border-left-color:var(--muted); }
+  .esc-resolved .esc-title, .esc-resolved .esc-owner, .esc-resolved .esc-reason,
+  .esc-resolved .esc-meta, .esc-resolved .esc-sep { color:var(--muted); }
+  .esc-note-ok { color:var(--ok); }
+  .esc-resolved-box { margin-top:4px; }
+  .esc-summary { font-size:9px; color:var(--muted); cursor:pointer; }
+  .esc-actions { display:flex; gap:5px; align-items:center; margin-top:4px; }
+  .esc-note-input { flex:1; min-width:0; background:var(--panel); border:1px solid var(--border); color:var(--text);
+    border-radius:6px; padding:2px 5px; font-size:9px; font-family:inherit; }
+  .esc-note-input:focus { outline:none; border-color:var(--accent); }
+  .esc-btn { background:transparent; border:1px solid var(--border); color:var(--muted); border-radius:6px;
+    padding:2px 7px; font-size:8px; text-transform:uppercase; letter-spacing:.06em; cursor:pointer; font-family:inherit; }
+  .esc-btn:disabled { opacity:.5; cursor:default; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="brand"><img src="assets/duDdev-logo.svg?v=2" alt="duDDev" style="height:28px;width:auto;display:inline-block;vertical-align:middle;filter:drop-shadow(0 2px 6px rgba(56,189,248,0.4));"><span style="margin-left:8px;font-weight:700;font-size:14px;letter-spacing:-0.02em;">duDDev</span></div>
+    <div style="display:flex;align-items:center;gap:12px;font-size:12px;color:var(--muted);">
+      <span>Workforce: <b id="opencodeStatus" style="color:var(--warn)">booting…</b></span>
+      <button onclick="toggleMenu()" style="background:var(--panel);border:1px solid var(--border);color:var(--text);padding:4px 10px;border-radius:6px;cursor:pointer;font-size:11px;font-family:inherit;">Menu</button>
+    </div>
+  </header>
+
+  <main class="scene-wrap">
+    <div id="scene"></div>
+    <div class="overlay">
+      <div class="stat">Phase: <b id="phase">Planning</b></div>
+      <div class="stat">Throughput: <b id="throughput">0</b>/hr</div>
+    </div>
+    <div class="hint">Drag to orbit · Scroll to zoom</div>
+  </main>
+
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const feedLines = [];
+
+const container = document.getElementById('scene');
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xdbeafe);
+scene.fog = new THREE.Fog(0xdbeafe, 38, 65);
+
+const camera = new THREE.PerspectiveCamera(45, container.clientWidth/container.clientHeight, 0.1, 200);
+camera.position.set(0, 20, 24);
+
+const renderer = new THREE.WebGLRenderer({ antialias:true });
+renderer.setSize(container.clientWidth, container.clientHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+container.appendChild(renderer.domElement);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0,0,0);
+controls.enableDamping = true; controls.dampingFactor = 0.08;
+controls.maxPolarAngle = Math.PI/2.1; controls.minDistance = 12; controls.maxDistance = 55;
+
+scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+const sun = new THREE.DirectionalLight(0xfff7ed, 1.0);
+sun.position.set(12,24,10); sun.castShadow=true;
+sun.shadow.mapSize.set(2048,2048);
+sun.shadow.camera.left=-24; sun.shadow.camera.right=24;
+sun.shadow.camera.top=18; sun.shadow.camera.bottom=-18;
+scene.add(sun);
+const fill = new THREE.DirectionalLight(0x93c5fd, 0.3);
+fill.position.set(-10,12,-8); scene.add(fill);
+
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(30,24), new THREE.MeshStandardMaterial({color:0xe2e8f0, roughness:0.9}));
+floor.rotation.x=-Math.PI/2; floor.receiveShadow=true; scene.add(floor);
+const grid = new THREE.GridHelper(30,30,0x94a3b8,0xcbd5e1); grid.position.y=0.01; scene.add(grid);
+
+function wall(w,h,d,x,z) {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), new THREE.MeshStandardMaterial({color:0x94a3b8, transparent:true, opacity:0.25, roughness:0.2}));
+  m.position.set(x,h/2,z); scene.add(m);
+}
+wall(30,2.4,0.12,0,-12.1); wall(30,2.4,0.12,0,12.1);
+wall(0.12,2.4,24,-15.1,0); wall(0.12,2.4,24,15.1,0);
+
+function box(w,h,d,x,y,z,color,opts={}) {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), new THREE.MeshStandardMaterial({color, roughness:opts.r??0.6, metalness:opts.m??0.05}));
+  m.position.set(x,y,z);
+  if (opts.shadow) { m.castShadow=true; m.receiveShadow=true; }
+  scene.add(m); return m;
+}
+
+function station(s) {
+  const g = new THREE.Group();
+  const rug = new THREE.Mesh(new THREE.PlaneGeometry(6,4.5), new THREE.MeshStandardMaterial({color:0xbfdbfe}));
+  rug.rotation.x=-Math.PI/2; rug.position.y=0.02; g.add(rug);
+  const desk = new THREE.Mesh(new THREE.BoxGeometry(3.6,0.7,1.6), new THREE.MeshStandardMaterial({color:0x92400e, roughness:0.6}));
+  desk.position.set(0,0.35,0); desk.castShadow=true; desk.receiveShadow=true; g.add(desk);
+  const mon = new THREE.Mesh(new THREE.BoxGeometry(1.6,1.0,0.1), new THREE.MeshStandardMaterial({color:0x1e293b}));
+  mon.position.set(0,1.3,-0.5); mon.castShadow=true; g.add(mon);
+  const scr = new THREE.Mesh(new THREE.PlaneGeometry(1.45,0.85), new THREE.MeshStandardMaterial({color:0x38bdf8, emissive:0x38bdf8, emissiveIntensity:0.45}));
+  scr.position.set(0,1.3,-0.44); g.add(scr);
+  const chair = new THREE.Mesh(new THREE.BoxGeometry(0.8,0.45,0.8), new THREE.MeshStandardMaterial({color:0x475569}));
+  chair.position.set(0,0.22,1.1); chair.castShadow=true; g.add(chair);
+  const plant = new THREE.Mesh(new THREE.CylinderGeometry(0.2,0.25,0.5,8), new THREE.MeshStandardMaterial({color:0x16a34a}));
+  plant.position.set(2.4,0.25,1.6); plant.castShadow=true; g.add(plant);
+  const canvas = document.createElement('canvas'); canvas.width=256; canvas.height=56;
+  const c=canvas.getContext('2d');
+  c.fillStyle='rgba(15,23,42,0.85)'; c.fillRect(0,0,256,56);
+  c.strokeStyle='#38bdf8'; c.lineWidth=2; c.strokeRect(2,2,252,52);
+  c.fillStyle='#f1f5f9'; c.font='bold 18px Inter,sans-serif'; c.textAlign='center'; c.textBaseline='middle';
+  c.fillText(s.label,128,28);
+  const tex=new THREE.CanvasTexture(canvas);
+  const spr=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,transparent:true}));
+  spr.scale.set(3.6,0.78,1); spr.position.set(0,3.0,0); g.add(spr);
+  g.position.set(s.x,0,s.z); scene.add(g);
+}
+const ROOMS = {
+  planning:  { label:'Planning',   x:-8, z:-6 },
+  analysis:  { label:'Analysis',   x: 0, z:-6 },
+  design:    { label:'Design',     x: 8, z:-6 },
+  dev:       { label:'Dev Bay',    x:-8, z: 2 },
+  qa:        { label:'QA Lab',     x: 0, z: 2 },
+  deploy:    { label:'Deploy',     x: 8, z: 2 },
+  ops:       { label:'Ops',       x: 8, z: 8 },
+  support:   { label:'Support',    x: 0, z: 8 },
+  breakroom: { label:'Break',      x:-8, z: 8 },
+};
+for (const s of Object.values(ROOMS)) station(s);
+box(5,0.12,2.5,0,0.72,-2,0x64748b,{shadow:true});
+
+function avatar(shirtColor) {
+  const g = new THREE.Group();
+  const skin=0xfcd9b6, pants=0x1e293b, shoes=0x0f172a;
+  const shoeL = new THREE.Mesh(new THREE.BoxGeometry(0.22,0.12,0.32), new THREE.MeshStandardMaterial({color:shoes}));
+  shoeL.position.set(-0.16,0.06,0.05); shoeL.castShadow=true; g.add(shoeL);
+  const shoeR = shoeL.clone(); shoeR.position.x=0.16; g.add(shoeR);
+  const legL = new THREE.Mesh(new THREE.BoxGeometry(0.24,0.7,0.26), new THREE.MeshStandardMaterial({color:pants}));
+  legL.position.set(-0.16,0.47,0); legL.castShadow=true; g.add(legL);
+  const legR = legL.clone(); legR.position.x=0.16; g.add(legR);
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.72,0.85,0.38), new THREE.MeshStandardMaterial({color:shirtColor, roughness:0.6}));
+  torso.position.set(0,1.25,0); torso.castShadow=true; g.add(torso);
+  const armL = new THREE.Mesh(new THREE.BoxGeometry(0.2,0.75,0.22), new THREE.MeshStandardMaterial({color:shirtColor}));
+  armL.position.set(-0.5,1.22,0); armL.castShadow=true; g.add(armL);
+  const armR = armL.clone(); armR.position.x=0.5; g.add(armR);
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.52,0.52,0.5), new THREE.MeshStandardMaterial({color:skin, roughness:0.7}));
+  head.position.set(0,1.95,0); head.castShadow=true; g.add(head);
+  const hair = new THREE.Mesh(new THREE.BoxGeometry(0.56,0.2,0.54), new THREE.MeshStandardMaterial({color:0x334155}));
+  hair.position.set(0,2.22,0); g.add(hair);
+  const headset = new THREE.Mesh(new THREE.BoxGeometry(0.58,0.06,0.56), new THREE.MeshStandardMaterial({color:0x0f172a}));
+  headset.position.set(0,2.05,0); g.add(headset);
+  g.userData = { legL,legR,armL,armR,head,torso, walkPhase:Math.random()*Math.PI*2, bob:Math.random()*Math.PI*2 };
+  return g;
+}
+
+const AGENTS = [
+  { id:'orch', name:'Orchestrator', role:'Lead Orchestrator', matrixRole:'orchestrator_lead', manager:true, phases:['Planning','Analysis','Design','Development','Review','Deployment','Operations'], color:0x38bdf8, init:'OR' },
+  { id:'po', name:'Product Owner', role:'Product Mgmt', matrixRole:'product_owner_product_manager', phases:['Planning','Analysis'], color:0x8b5cf6, init:'PO' },
+  { id:'be', name:'Biz Enable', role:'Business Enablement', matrixRole:'business_enablement', phases:['Planning','Analysis','Operations'], color:0x0ea5e9, init:'BE' },
+  { id:'ux', name:'UI/UX', role:'UI/UX Designer', matrixRole:'ui_ux_designer', phases:['Design'], color:0xf472b6, init:'UX' },
+  { id:'se', name:'Software Eng', role:'Software Engineer', matrixRole:'software_engineer', phases:['Development'], color:0x22c55e, init:'SE' },
+  { id:'de', name:'Data Eng', role:'Database Engineer', matrixRole:'database_engineer', phases:['Design','Development'], color:0x14b8a6, init:'DE' },
+  { id:'aie', name:'AI Eng', role:'AI Engineer', matrixRole:'ai_engineer', phases:['Design','Development'], color:0xc084fc, init:'AI' },
+  { id:'qa', name:'QA', role:'Quality Assurance', matrixRole:'quality_assurance', phases:['Review'], color:0xfbbf24, init:'QA' },
+  { id:'dso', name:'DevOps', role:'DevOps/SRE', matrixRole:'devops_sre', phases:['Deployment','Operations'], color:0xfb923c, init:'DO' },
+  { id:'ce', name:'Cloud Eng', role:'Cloud Engineer', matrixRole:'cloud_engineer', phases:['Deployment','Operations'], color:0x60a5fa, init:'CL' },
+  { id:'iti', name:'Infra', role:'IT Infrastructure', matrixRole:'it_infrastructure', phases:['Operations','Deployment'], color:0x64748b, init:'IT' },
+  { id:'ns', name:'NetSec', role:'Network & Security', matrixRole:'network_and_security', phases:['Review','Operations'], color:0xef4444, init:'NS' },
+  { id:'soc', name:'SOC', role:'Security Operations', matrixRole:'security_operations_soc', phases:['Review','Operations'], color:0xdc2626, init:'SC' },
+  { id:'dba', name:'DBA', role:'Database Admin', matrixRole:'database_administrator', phases:['Operations','Deployment'], color:0x0f766e, init:'DB' },
+  { id:'da', name:'Data Analyst', role:'Data Analyst', matrixRole:'data_analyst', phases:['Analysis','Planning'], color:0x2dd4bf, init:'DA' },
+  { id:'sd', name:'Service Desk', role:'IT Support', matrixRole:'it_support_service_desk', phases:['Operations'], color:0x94a3b8, init:'SD' },
+];
+const agents = AGENTS.map((r,i) => {
+  const homePhase = r.phases?.[0] || 'Planning';
+  const roomByPhase = { Planning:'planning', Analysis:'analysis', Design:'design', Development:'dev', Review:'qa', Deployment:'deploy', Operations:'ops' };
+  const roomKey = roomByPhase[homePhase] || 'breakroom';
+  const st = ROOMS[roomKey] || ROOMS.breakroom;
+  const av = avatar(r.color);
+  av.position.set(st.x + (Math.random()-0.5)*2, 0, st.z + (Math.random()-0.5)*1.5);
+  scene.add(av);
+  const canvas = document.createElement('canvas'); canvas.width=200; canvas.height=44;
+  const c=canvas.getContext('2d');
+  c.fillStyle='rgba(15,23,42,0.85)'; c.fillRect(0,0,200,44);
+  c.strokeStyle='#38bdf8'; c.lineWidth=2; c.strokeRect(2,2,196,40);
+  c.fillStyle='#f1f5f9'; c.font='bold 16px Inter,sans-serif'; c.textAlign='center'; c.textBaseline='middle';
+  c.fillText(r.name,100,14);
+  c.fillStyle='#94a3b8'; c.font='11px Inter,sans-serif';
+  c.fillText(r.role,100,32);
+  const tex=new THREE.CanvasTexture(canvas);
+  const spr=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,transparent:true}));
+  spr.scale.set(2.0,0.44,1); spr.position.set(0,2.7,0); av.add(spr);
+  return { ...r, avatar:av, x:av.position.x, z:av.position.z, tx:av.position.x, tz:av.position.z,
+    status:'idle', task:null, phase:'Planning', speed:0.05+Math.random()*0.02 };
+});
+
+const PHASES = ['Planning','Analysis','Design','Development','Review','Deployment','Operations'];
+const PHASE_ROOM = { Planning:'planning', Analysis:'analysis', Design:'design', Development:'dev', Review:'qa', Deployment:'deploy', Operations:'ops' };
+const TASK_TITLES = ['Feature impl','Bug fix','Refactor','Docs update','CI pipeline','Security scan','Test suite','Research','Deploy release','Ops check','Auth flow','API endpoint'];
+const PHASE_ROLE_MATRIX = {
+  Planning: ['product_owner_product_manager'],
+  Analysis: ['business_enablement','data_analyst'],
+  Design: ['ui_ux_designer','database_engineer','ai_engineer'],
+  Development: ['software_engineer','database_engineer','ai_engineer'],
+  Review: ['quality_assurance','network_and_security','security_operations_soc'],
+  Deployment: ['devops_sre','cloud_engineer','database_administrator'],
+  Operations: ['it_infrastructure','it_support_service_desk','devops_sre'],
+};
+
+const tasks = [];
+const injectedLiveIds = new Set();
+let nextId = 1;
+function defaultRolesForPhase(phase) {
+  return PHASE_ROLE_MATRIX[phase] || ['software_engineer'];
+}
+
+function createGoalPlan(goal, description='') {
+  const goalName = (goal || '').trim() || 'New Product Goal';
+  const goalDesc = (description || '').trim();
+  tasks.push({
+    id: nextId++,
+    title: `Build: ${goalName}`,
+    phase: 'Planning',
+    progress: 0,
+    owner: null,
+    source: 'goal',
+    goal: goalName,
+    description: goalDesc,
+    requiredRoles: defaultRolesForPhase('Planning'),
+    pendingRoles: defaultRolesForPhase('Planning').slice(),
+    currentRole: null,
+    strictDelegation: true
+  });
+  logFeed('Orchestrator', `started goal "${goalName}" and created role-based execution plan`);
+  assignWork();
+}
+
+function spawnTask() {
+  const title = TASK_TITLES[Math.floor(Math.random()*TASK_TITLES.length)];
+  const roles = defaultRolesForPhase('Planning');
+  tasks.push({ id: nextId++, title, phase:'Planning', progress:0, owner:null, source:'simulation', requiredRoles: roles, pendingRoles: roles.slice(), currentRole:null, strictDelegation:true });
+  logFeed('system', 'New task: ' + title);
+}
+createGoalPlan('Launch product v1', 'Initial orchestration run for virtual office');
+
+let liveConnected = false;
+let liveDelegations = [];
+let liveRun = null;
+let liveAgency = null;
+let liveTokens = null;
+let liveClient = null;
+let liveSavings = null;
+
+function upsertLiveTask(item) {
+  if (!item || !item.id || !item.title) return;
+  const existing = tasks.find(t => t.externalId === item.id);
+  if (existing) {
+    if (existing.phase === 'Planning' && item.phase && item.phase !== existing.phase) existing.phase = item.phase;
+    return;
+  }
+  const title = item.title.slice(0, 80);
+  tasks.push({
+    id: nextId++,
+    externalId: item.id,
+    title,
+    phase: item.phase || 'Planning',
+    progress: 0,
+    owner: null,
+    source: 'opencode',
+    requiredRoles: defaultRolesForPhase(item.phase || 'Planning'),
+    pendingRoles: defaultRolesForPhase(item.phase || 'Planning').slice(),
+    currentRole: null,
+    strictDelegation: true
+  });
+  if (!injectedLiveIds.has(item.id)) {
+    injectedLiveIds.add(item.id);
+    logFeed('Orchestrator', `ingested from OpenCode: "${title}"`);
+  }
+}
+
+async function syncOpenCodeLive() {
+  const statusEl = document.getElementById('opencodeStatus');
+  try {
+    const res = await fetch('/api/opencode/live', { cache: 'no-store' });
+    const data = await res.json();
+    liveConnected = !!data.connected;
+    if (statusEl) {
+      const mode = liveConnected ? 'active + background' : 'simulation only';
+      statusEl.textContent = mode;
+      statusEl.style.color = liveConnected ? 'var(--ok)' : 'var(--danger)';
+    }
+    if (data.agency) liveAgency = data.agency;
+    if (data.tokens) liveTokens = data.tokens;
+    if (data.savings) liveSavings = data.savings;
+    if (data.client) liveClient = data.client;
+    if (!liveConnected) {
+      liveDelegations = [];
+      liveRun = null;
+      updatePopup();
+      return;
+    }
+    for (const item of data.workItems || []) upsertLiveTask(item);
+    liveDelegations = Array.isArray(data.delegations) ? data.delegations : [];
+    liveRun = data.activeRun || null;
+    for (const ev of (data.feed || []).slice(0, 4)) {
+      if (!ev?.text) continue;
+      const key = `${ev.time || ''}|${ev.who || ''}|${ev.text}`;
+      if (injectedLiveIds.has(key)) continue;
+      injectedLiveIds.add(key);
+      logFeed(ev.who || 'OpenCode', ev.text);
+    }
+    updatePopup();
+  } catch (_) {
+    liveConnected = false;
+    liveDelegations = [];
+    liveRun = null;
+    if (statusEl) {
+      statusEl.textContent = 'offline';
+      statusEl.style.color = 'var(--danger)';
+    }
+  }
+}
+
+let deployCount=0, bugCount=8, testsPass=120, completedCount=0, throughput=0;
+const start = Date.now();
+let currentPhaseIdx=0;
+
+function logFeed(who, text) {
+  feedLines.unshift({ time: new Date().toLocaleTimeString(), who, text });
+  if (feedLines.length > 40) feedLines.length = 40;
+  const feed = document.getElementById('feed');
+  if (feed) {
+    const line = document.createElement('div');
+    line.className='line';
+    line.innerHTML = `<span class="time">${feedLines[0].time}</span><div><span class="agent">${who}</span> <span class="action">${text}</span></div>`;
+    feed.prepend(line);
+    while (feed.children.length > 40) feed.removeChild(feed.lastChild);
+  }
+}
+
+function assignWork() {
+  const open = tasks
+    .filter(t=>!t.owner && t.phase!=='Done' && Array.isArray(t.pendingRoles) && t.pendingRoles.length>0)
+    .sort((a,b)=>a.id-b.id);
+  if (!open.length) return;
+  const t = open[0];
+  dispatchTask(t, 'dispatch');
+  renderAgentList();
+}
+
+function pickAgentForRole(roleKey) {
+  const roleMatch = agents.filter(a=>!a.manager && a.status==='idle' && a.matrixRole===roleKey);
+  return roleMatch.length ? roleMatch[0] : null;
+}
+
+function dispatchTask(t, verb='dispatch') {
+  const roleKey = (Array.isArray(t.pendingRoles) && t.pendingRoles.length) ? t.pendingRoles[0] : null;
+  if (!roleKey) return false;
+  const a = pickAgentForRole(roleKey);
+  if (!a) return false;
+  t.owner = a.id;
+  t.currentRole = roleKey;
+  const st = ROOMS[PHASE_ROOM[t.phase]] || ROOMS.breakroom;
+  a.tx = st.x + (Math.random()-0.5)*2.0;
+  a.tz = st.z + (Math.random()-0.5)*1.4;
+  a.status='working';
+  a.task=t.title;
+  a.phase=t.phase;
+  logFeed('Orchestrator', `[DELEGATION] ${verb} "${t.title}" (${t.phase}) -> ${a.name} [${roleKey}]`);
+  return true;
+}
+
+setInterval(() => {
+  for (const t of tasks) {
+    if (t.phase==='Done') continue;
+    if (t.owner) {
+      t.progress += Math.random()*9 + 4;
+      if (t.progress >= 100) {
+        const idx = PHASES.indexOf(t.phase);
+        const next = PHASES[idx+1];
+        const worker = agents.find(a=>a.id===t.owner);
+        if (worker) {
+          worker.status='idle';
+          worker.task=null;
+          const b=ROOMS.breakroom;
+          worker.tx=b.x+(Math.random()-0.5)*2;
+          worker.tz=b.z+(Math.random()-0.5)*1.4;
+        }
+        const finishedRole = t.currentRole;
+        const pending = Array.isArray(t.pendingRoles) ? t.pendingRoles : [];
+        if (finishedRole) {
+          t.pendingRoles = pending.filter(r => r !== finishedRole);
+        }
+        t.currentRole = null;
+
+        if (t.pendingRoles && t.pendingRoles.length) {
+          t.progress = 0;
+          t.owner = null;
+          logFeed('Orchestrator', `[DELEGATION] next specialist required for ${t.phase}: ${t.pendingRoles[0]}`);
+          dispatchTask(t, 'delegate');
+          continue;
+        }
+
+        if (next) {
+          t.phase = next;
+          t.requiredRoles = defaultRolesForPhase(next);
+          t.pendingRoles = t.requiredRoles.slice();
+          t.progress=0;
+          t.owner = null;
+          dispatchTask(t, 'handoff');
+          if (t.phase==='Deployment') deployCount++;
+        } else {
+          t.phase='Done'; t.progress=100;
+          logFeed(worker?worker.name:'system', `completed "${t.title}"`);
+          completedCount++;
+        }
+      }
+    }
+  }
+  renderAgentList();
+  updateMetrics();
+}, 1500);
+
+setInterval(assignWork, 2000);
+setInterval(() => { if (!liveConnected && tasks.filter(t=>t.phase!=='Done').length < 4) spawnTask(); }, 12000);
+setInterval(syncOpenCodeLive, 7000);
+
+function updateMetrics() {
+  throughput = Math.round((completedCount*3600)/((Date.now()-start)/1000+1));
+  const t = document.getElementById('throughput'); if(t) t.textContent = isFinite(throughput)?throughput:0;
+  const ac = document.getElementById('agentCount'); if(ac) ac.textContent = agents.length;
+  const at = document.getElementById('activeTasks'); if(at) at.textContent = tasks.filter(t=>t.phase!=='Done').length;
+  const tc = document.getElementById('teamCount'); if(tc) tc.textContent = agents.length;
+  currentPhaseIdx = (currentPhaseIdx + (Math.random()<0.02?1:0)) % PHASES.length;
+  const ph = document.getElementById('phase'); if(ph) ph.textContent = PHASES[currentPhaseIdx];
+}
+
+function renderAgentList() {
+  const el = document.getElementById('agentList');
+  if (!el) return;
+  el.innerHTML = '';
+  for (const a of agents) {
+    const div = document.createElement('div');
+    div.className='agent';
+    div.innerHTML = `
+      <div class="av" style="background:#${a.color.toString(16).padStart(6,'0')}">${a.init}</div>
+      <div class="info">
+        <div class="name">${a.name}</div>
+        <div class="role">${a.role}</div>
+        <div class="status st-${a.status}"><span class="s-dot"></span>${a.status}</div>
+      </div>`;
+    el.appendChild(div);
+  }
+}
+
+setInterval(() => { const cl=document.getElementById('clock'); if(cl) cl.textContent = new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}); }, 1000);
+renderAgentList(); logFeed('system','duDDev Virtual Office online — all agents reporting');
+syncOpenCodeLive();
+
+/* ---------- Animation ---------- */
+const clock3 = new THREE.Clock();
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = Math.min(clock3.getDelta(), 0.05);
+  const t = performance.now();
+  for (const a of agents) {
+    const dx = a.tx - a.x, dz = a.tz - a.z;
+    const dist = Math.hypot(dx,dz);
+    let moving = false;
+    if (dist > 0.05) {
+      const step = a.speed * dt * 60;
+      const m = Math.min(dist, step);
+      a.x += (dx/dist)*m;
+      a.z += (dz/dist)*m;
+      a.avatar.position.x = a.x;
+      a.avatar.position.z = a.z;
+      a.avatar.rotation.y = Math.atan2(dx, dz);
+      moving = true;
+    }
+    const u = a.avatar.userData;
+    if (moving) {
+      a.walkPhase = (a.walkPhase||0) + dt*10;
+      const s = Math.sin(a.walkPhase);
+      u.legL.rotation.x = s*0.7; u.legR.rotation.x = -s*0.7;
+      u.armL.rotation.x = -s*0.6; u.armR.rotation.x = s*0.6;
+      a.avatar.position.y = 0;
+    } else {
+      u.legL.rotation.x *= 0.85; u.legR.rotation.x *= 0.85;
+      u.armL.rotation.x *= 0.85; u.armR.rotation.x *= 0.85;
+      u.torso.scale.y = 1 + Math.sin(t*0.003 + (a.bob||0))*0.02;
+      u.head.rotation.y = Math.sin(t*0.001 + (a.bob||0))*0.15;
+      if (a.status === 'working') {
+        u.armL.rotation.x = -0.8 + Math.sin(t*0.012 + (a.bob||0))*0.15;
+        u.armR.rotation.x = -0.8 + Math.sin(t*0.012 + (a.bob||0)+1)*0.15;
+      }
+      a.avatar.position.y = Math.sin(t*0.002 + (a.bob||0))*0.03;
+    }
+  }
+  controls.update();
+  renderer.render(scene, camera);
+}
+animate();
+
+function toggleMenu() {
+  const p = document.getElementById('menu-popup');
+  p.classList.toggle('active');
+  if (p.classList.contains('active')) updatePopup();
+}
+window.toggleMenu = toggleMenu;
+async function startGoalFromMenu() {
+  const goalEl = document.getElementById('goal-input');
+  const descEl = document.getElementById('goal-desc');
+  const goal = (goalEl?.value || '').trim();
+  const desc = (descEl?.value || '').trim();
+  if (!goal) { logFeed('Orchestrator', 'goal is empty — add a goal first'); return; }
+  createGoalPlan(goal, desc);
+  try {
+    const r = await fetch('/api/orchestrate/goal', {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify({ goal, description: desc })
+    });
+    const data = await r.json();
+    if (data?.ok) {
+      logFeed('Orchestrator', `subagent run started in active session${data.runID ? ` (${data.runID})` : ''}`);
+      if (data.response) logFeed('Orchestrator', data.response);
+    } else {
+      logFeed('Orchestrator', `active-session kickoff failed: ${data?.error || 'unknown error'}`);
+    }
+  } catch (e) {
+    logFeed('Orchestrator', `active-session kickoff failed: ${String(e.message || e)}`);
+  }
+  if (goalEl) goalEl.value='';
+  if (descEl) descEl.value='';
+  updatePopup();
+}
+window.startGoalFromMenu = startGoalFromMenu;
+
+/* ---------- Agency panels (sprint board / workload / delivery metrics) ---------- */
+
+/** Escape text coming from the API before it goes into innerHTML. */
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, (c) => (
+    { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]
+  ));
+}
+/** Small DOM node builder — text is set with textContent, never parsed. */
+function el(tag, cls, text) {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text !== undefined && text !== null) n.textContent = String(text);
+  return n;
+}
+function num(v, fallback = 0) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
+}
+/**
+ * Compact token counts: 812 -> "812", 24500 -> "24.5K", 11905815 -> "11.9M".
+ * Raw digit strings are unreadable in a 320px panel.
+ */
+function compact(v) {
+  const n = num(v);
+  const abs = Math.abs(n);
+  if (abs >= 1e9) return `${(n / 1e9).toFixed(abs >= 1e10 ? 0 : 1)}B`;
+  if (abs >= 1e6) return `${(n / 1e6).toFixed(abs >= 1e7 ? 1 : 2)}M`;
+  if (abs >= 1e4) return `${(n / 1e3).toFixed(abs >= 1e5 ? 0 : 1)}K`;
+  if (abs >= 1000) return `${(n / 1e3).toFixed(2)}K`;
+  return String(Math.round(n));
+}
+/** Fraction (0..1) as sent by the agency API -> percent string. */
+function pctOf(v) {
+  return `${Math.round(num(v) * 100)}%`;
+}
+const PILL_CLASS = {
+  backlog: 'pill-backlog', ready: 'pill-ready', in_progress: 'pill-in_progress',
+  review: 'pill-review', blocked: 'pill-blocked', done: 'pill-done'
+};
+
+/** Sprint Board — current sprint + its tasks grouped by phase. */
+function renderBoard(agency) {
+  const box = document.getElementById('popup-board');
+  if (!box) return;
+  box.innerHTML = '';
+  const metrics = (agency && agency.metrics) || {};
+  const sprint = metrics.currentSprint || null;
+  const roster = (agency && Array.isArray(agency.roster)) ? agency.roster : [];
+  const tasks = (agency && Array.isArray(agency.tasks)) ? agency.tasks : [];
+  const phases = (agency && Array.isArray(agency.phases)) ? agency.phases : [];
+
+  const head = document.createElement('div');
+  head.className = 'board-head';
+  head.innerHTML = `<span class="sprint">${esc(sprint ? sprint.name : 'No active sprint')}</span>`
+    + `<span class="days">${esc(sprint ? `${num(sprint.daysRemaining)}d left` : '')}</span>`;
+  box.appendChild(head);
+
+  if (!agency) {
+    box.appendChild(el('div', 'muted-note', 'Loading agency data…'));
+    return;
+  }
+  const scoped = sprint ? tasks.filter((t) => t.sprintId === sprint.id) : tasks;
+  const groups = new Map();
+  for (const t of scoped) {
+    const phase = t.phase || 'Unassigned';
+    if (!groups.has(phase)) groups.set(phase, []);
+    groups.get(phase).push(t);
+  }
+  const order = phases.filter((p) => groups.has(p)).concat([...groups.keys()].filter((p) => !phases.includes(p)));
+  if (!order.length) {
+    box.appendChild(el('div', 'muted-note', 'No tasks in this sprint'));
+    return;
+  }
+  const nameOf = (id) => (roster.find((r) => r.id === id) || {}).name || 'Unassigned';
+  for (const phase of order) {
+    box.appendChild(el('div', 'board-phase', phase));
+    for (const t of groups.get(phase)) {
+      const row = el('div', 'task');
+      const taskHead = el('div', 't-head');
+      taskHead.appendChild(el('span', 't-title', t.title || 'Untitled task'));
+      taskHead.appendChild(el('span', `pill ${PILL_CLASS[t.status] || 'pill-backlog'}`, t.status || 'unknown'));
+      row.appendChild(taskHead);
+      const meta = el('div', 't-meta');
+      meta.appendChild(el('span', null, nameOf(t.ownerId)));
+      meta.appendChild(el('span', null, `${num(t.estimateHours)}h`));
+      meta.appendChild(el('span', null, `${num(t.points)} pts`));
+      row.appendChild(meta);
+      if (t.status === 'blocked' && t.blockedReason) row.appendChild(el('div', 't-blocked', t.blockedReason));
+      box.appendChild(row);
+    }
+  }
+}
+
+/* ---------- Escalations (level · owner · age) ---------- */
+const ESC_LEVEL_LABELS = { 1: 'Product Owner', 2: 'Orchestrator', 3: 'Client' };
+const ESC_RESOLVED_CAP = 5;
+/** Per-id state kept across the 7 s re-render: draft note, last error, in-flight request. */
+const escDrafts = new Map();
+const escErrors = new Map();
+const escBusy = new Set();
+
+/** Age in ms = now - blockedSince (fallback createdAt); null when there is no usable clock. */
+function escAgeMs(e) {
+  const bs = num(e && e.blockedSince, 0);
+  const ca = num(e && e.createdAt, 0);
+  const start = bs > 0 ? bs : (ca > 0 ? ca : 0);
+  if (!start) return null;
+  return Math.max(0, Date.now() - start);   // clock skew clamps to 0 -> "just now"
+}
+
+/** "just now" | "31h" | "3d 7h" | "age —" */
+function escAgeText(ageMs) {
+  if (ageMs === null) return 'age —';
+  const hours = ageMs / 3600000;
+  if (hours < 1) return 'just now';
+  if (hours < 24) return `${Math.floor(hours)}h`;
+  const days = Math.floor(hours / 24);
+  const rest = Math.floor(hours % 24);
+  return rest ? `${days}d ${rest}h` : `${days}d`;
+}
+
+/** Level recomputed in the browser: min(3, 1 + floor(ageHours/24)); stored level is the fallback. */
+function escLevel(e, ageMs) {
+  if (ageMs !== null) return Math.min(3, Math.max(1, 1 + Math.floor((ageMs / 3600000) / 24)));
+  const stored = Math.round(num(e && e.level, 1));
+  return Math.min(3, Math.max(1, stored || 1));
+}
+
+/** Fixed Product Owner / Orchestrator / Client names; escalationPath may override per level. */
+function escLevelLabel(agency, level) {
+  const path = agency && agency.escalationPath;
+  let override = '';
+  if (path && typeof path === 'object' && !Array.isArray(path)) {
+    const keyed = path[String(level)] !== undefined ? path[String(level)]
+      : (path[`L${level}`] !== undefined ? path[`L${level}`] : null);
+    if (typeof keyed === 'string') override = keyed.trim();
+    else if (keyed && typeof keyed === 'object') {
+      const label = keyed.label || keyed.name || keyed.role;
+      if (typeof label === 'string') override = label.trim();
+    }
+  }
+  return override || ESC_LEVEL_LABELS[level] || `L${level}`;
+}
+
+/** Sort key: blockedSince (fallback createdAt); records with no usable clock sort last. */
+function escClock(e) {
+  const bs = num(e && e.blockedSince, 0);
+  if (bs > 0) return bs;
+  const ca = num(e && e.createdAt, 0);
+  return ca > 0 ? ca : Number.MAX_SAFE_INTEGER;
+}
+
+/** One escalation row: [L2] taskTitle owner over reason · taskId · matrixRole · age. */
+function escRow(e, agency, isResolved) {
+  const ageMs = escAgeMs(e);
+  const level = escLevel(e, ageMs);
+  const row = el('div', `wl-row esc-row ${isResolved ? 'esc-resolved' : `lv${level}`}`);
+
+  const head = el('div', 'wl-line esc-head');
+  head.appendChild(el('span', `esc-chip ${isResolved ? '' : `esc-l${level}`}`,
+    isResolved ? 'RESOLVED' : `L${level} · ${escLevelLabel(agency, level)}`));
+  head.appendChild(el('span', 'esc-title', e.taskTitle || 'Untitled task'));
+  head.appendChild(el('span', 'esc-owner', e.owner || '—'));
+  row.appendChild(head);
+
+  const age = escAgeText(ageMs);
+  const parts = [];
+  if (e.reason) parts.push(['esc-reason', e.reason]);
+  if (e.taskId) parts.push(['esc-meta', e.taskId]);
+  if (e.matrixRole) parts.push(['esc-meta', e.matrixRole]);
+  parts.push(['esc-meta esc-age', /^\d/.test(age) ? `${age} old` : age]);
+  const sub = el('div', 'wl-line esc-sub');
+  parts.forEach(([cls, text], i) => {
+    if (i) sub.appendChild(el('span', 'esc-sep', '·'));
+    sub.appendChild(el('span', cls, text));
+  });
+  row.appendChild(sub);
+
+  if (!isResolved) {
+    const actions = el('div', 'esc-actions');
+    const input = el('input', 'esc-note-input');
+    input.type = 'text';
+    input.placeholder = 'note (optional)';
+    input.value = escDrafts.get(e.id) || '';
+    input.oninput = () => escDrafts.set(e.id, input.value);
+    actions.appendChild(input);
+    const busy = escBusy.has(e.id);
+    const btn = el('button', 'esc-btn', busy ? '…' : 'Resolve');
+    btn.type = 'button';
+    btn.disabled = busy;
+    btn.onclick = () => resolveEscalation(e, btn);
+    actions.appendChild(btn);
+    row.appendChild(actions);
+    const err = escErrors.get(e.id);
+    if (err) row.appendChild(el('div', 'muted-note', err));
+  }
+  return row;
+}
+
+/** Resolve flow: disable + "…", POST /api/agency/escalation/:id/resolve, 200 -> refresh + re-render. */
+async function resolveEscalation(e, btn) {
+  const id = e.id;
+  if (!id || escBusy.has(id)) return;
+  escBusy.add(id);
+  escErrors.delete(id);
+  btn.disabled = true;
+  btn.textContent = '…';
+  const reason = String(escDrafts.get(id) || '').trim();
+  try {
+    const res = await fetch(`/api/agency/escalation/${encodeURIComponent(id)}/resolve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || (data && data.ok === false)) {
+      const err = (data && data.error) || {};
+      throw new Error(err.message || `resolve failed (HTTP ${res.status})`);
+    }
+    escDrafts.delete(id);
+    escBusy.delete(id);
+    await syncOpenCodeLive();
+    renderEscalations(liveAgency);
+  } catch (err) {
+    escBusy.delete(id);
+    escErrors.set(id, String((err && err.message) || err));
+    btn.disabled = false;
+    btn.textContent = 'Resolve';
+    renderEscalations(liveAgency);
+  }
+}
+
+/** Escalations — level chip, owner and live age; resolved rows collapse into a footer section. */
+function renderEscalations(agency) {
+  const box = document.getElementById('popup-escalations');
+  const badge = document.getElementById('popup-escalation-count');
+  if (!box) return;
+  box.innerHTML = '';
+  if (!agency) {
+    box.appendChild(el('div', 'muted-note', 'Loading agency data…'));
+    if (badge) badge.textContent = '';
+    return;
+  }
+  const list = Array.isArray(agency.escalations) ? agency.escalations : [];
+  const open = [];
+  const resolved = [];
+  for (const e of list) {
+    if (!e) continue;
+    (e.resolvedAt ? resolved : open).push(e);
+  }
+  open.sort((a, b) => escClock(a) - escClock(b));           // oldest first, never capped
+  resolved.sort((a, b) => num(b.resolvedAt, 0) - num(a.resolvedAt, 0));
+
+  if (badge) badge.textContent = `${open.length} open`;
+
+  if (!open.length) box.appendChild(el('div', 'muted-note esc-note-ok', 'No open escalations'));
+  for (const e of open) box.appendChild(escRow(e, agency, false));
+
+  if (resolved.length) {
+    const shown = resolved.slice(0, ESC_RESOLVED_CAP);
+    const details = el('details', 'esc-resolved-box');
+    details.appendChild(el('summary', 'esc-summary', `Resolved (${resolved.length})`));
+    for (const e of shown) details.appendChild(escRow(e, agency, true));
+    if (resolved.length > shown.length) {
+      details.appendChild(el('div', 'muted-note', `${resolved.length - shown.length} more resolved escalation(s) not shown`));
+    }
+    box.appendChild(details);
+  }
+}
+
+/** Workload & Resources — one row per roster member, busiest first. */
+function renderWorkload(agency) {
+  const box = document.getElementById('popup-workload');
+  if (!box) return;
+  box.innerHTML = '';
+  const roster = (agency && Array.isArray(agency.roster)) ? agency.roster : [];
+  const metrics = (agency && agency.metrics) || {};
+  const top = el('div', 'wl-top');
+  top.innerHTML = `Overall utilization <b>${esc(pctOf(metrics.utilization && metrics.utilization.percent))}</b>`;
+  box.appendChild(top);
+  if (!roster.length) {
+    box.appendChild(el('div', 'muted-note', agency ? 'No roster data' : 'Loading agency data…'));
+    return;
+  }
+  const sorted = roster.slice().sort((a, b) => num(b.utilization) - num(a.utilization));
+  for (const m of sorted) {
+    const u = num(m.utilization);
+    const over = u >= 1;
+    const row = el('div', 'wl-row');
+    const line = el('div', 'wl-line');
+    line.innerHTML = `<span class="wl-name">${esc(m.name || m.id || '')}</span>`
+      + `<span class="wl-load">${esc(`${num(m.loadHours)}/${num(m.capacityHours)}h`)}</span>`
+      + (over ? '<span class="wl-flag">over</span>' : '');
+    row.appendChild(line);
+    const bar = el('div', 'wl-bar');
+    const fill = el('div', over ? 'wl-fill over' : 'wl-fill');
+    fill.style.width = `${Math.max(0, Math.min(100, u * 100))}%`;
+    bar.appendChild(fill);
+    row.appendChild(bar);
+    box.appendChild(row);
+  }
+}
+
+/** Delivery Metrics — small stat tiles from the agency metrics block. */
+function renderMetrics(agency) {
+  const box = document.getElementById('popup-metrics');
+  if (!box) return;
+  box.innerHTML = '';
+  const metrics = (agency && agency.metrics) || {};
+  const sprint = metrics.currentSprint || null;
+  const velocity = (Array.isArray(metrics.velocity) ? metrics.velocity : [])
+    .find((v) => sprint && v.sprintId === sprint.id) || null;
+  const leadTime = metrics.leadTime || {};
+  const util = metrics.utilization || {};
+  const sla = metrics.sla || {};
+  const escalations = metrics.escalations || {};
+  const tiles = [
+    { label: 'Velocity', value: velocity ? `${num(velocity.completedPoints)}/${num(velocity.committedPoints)}` : '—', sub: 'points done' },
+    { label: 'Lead time', value: `${num(leadTime.avgHours)}h`, sub: 'avg cycle' },
+    { label: 'Utilization', value: pctOf(util.percent), sub: 'of capacity' },
+    { label: 'SLA', value: pctOf(sla.compliance), sub: 'on time' },
+    { label: 'Escalations', value: `${num(escalations.open)}`, sub: 'open' },
+    { label: 'Sprint done', value: sprint ? `${num(sprint.doneTasks)}/${num(sprint.totalTasks)}` : '—', sub: 'tasks' }
+  ];
+  const grid = el('div', 'tile-grid');
+  for (const t of tiles) {
+    const tile = el('div', 'tile');
+    tile.appendChild(el('div', 'tile-label', t.label));
+    tile.appendChild(el('div', 'tile-value', t.value));
+    tile.appendChild(el('div', 'tile-sub', t.sub));
+    grid.appendChild(tile);
+  }
+  box.appendChild(grid);
+  box.appendChild(renderTokenBudget());
+}
+
+// Token cost is a managed resource like hours: show the autopilot's spend
+// against its daily budget, and which roles are consuming it.
+function renderTokenBudget() {
+  const wrap = el('div', 'token-budget');
+  const tokens = liveTokens;
+  if (!tokens || !tokens.usage || !tokens.usage.ok) {
+    wrap.appendChild(el('div', 'muted-note', 'Token usage unavailable'));
+    return wrap;
+  }
+  const budget = tokens.budget || 0;
+  const spent = tokens.spentToday || 0;
+  const pct = budget ? Math.min(1, spent / budget) : 0;
+
+  const head = el('div', 'tile-grid');
+  const saved = liveSavings;
+  const saveTile = el('div', 'tile');
+  saveTile.appendChild(el('div', 'tile-label', 'Token saved'));
+  saveTile.appendChild(el('div', 'tile-value', saved ? compact(saved.totalSaved) : '—'));
+  saveTile.appendChild(el('div', 'tile-sub', saved ? `by rtk + caveman` : 'no data'));
+  head.appendChild(saveTile);
+
+  const rtkTile = el('div', 'tile');
+  rtkTile.appendChild(el('div', 'tile-label', 'RTK'));
+  rtkTile.appendChild(el('div', 'tile-value', saved ? `${Math.round(saved.rtk.percent)}%` : '—'));
+  rtkTile.appendChild(el('div', 'tile-sub', saved ? `${saved.rtk.tokensSavedLabel} over ${saved.rtk.commands} cmds` : 'no data'));
+  head.appendChild(rtkTile);
+  wrap.appendChild(head);
+
+  if (saved && saved.rtk.byCommand && saved.rtk.byCommand.length) {
+    wrap.appendChild(el('div', 'muted-note', 'Best savings'));
+    for (const c of saved.rtk.byCommand.slice(0, 4)) {
+      const row = el('div', 'token-row');
+      row.appendChild(el('span', 'token-role', c.command));
+      const bar = el('div', 'token-bar');
+      const fill = el('div', 'token-fill');
+      fill.style.width = `${Math.max(2, Math.round(c.percent))}%`;
+      bar.appendChild(fill);
+      row.appendChild(bar);
+      row.appendChild(el('span', 'token-val', compact(c.saved)));
+      wrap.appendChild(row);
+    }
+  }
+
+  const roleBudget = (tokens.usage && tokens.usage.roleBudget) || 0;
+  const roleRows = (tokens.usage && Array.isArray(tokens.usage.byRole))
+    ? tokens.usage.byRole.filter((r) => (r.todayAutopilotTokens || 0) > 0)
+    : [];
+  const topRole = roleRows.length ? roleRows.reduce((a, b) => (a.todayAutopilotTokens >= b.todayAutopilotTokens ? a : b)) : null;
+  const topPct = topRole && roleBudget ? Math.round((topRole.todayAutopilotTokens / roleBudget) * 100) : 0;
+
+  const tile = el('div', 'tile');
+  tile.appendChild(el('div', 'tile-label', 'Role budget'));
+  tile.appendChild(el('div', 'tile-value', `${topPct}%`));
+  tile.appendChild(el('div', 'tile-sub', topRole
+    ? `${compact(topRole.todayAutopilotTokens)} of ${compact(roleBudget)} · ${topRole.name || topRole.matrixRole}`
+    : `limit ${compact(roleBudget)} per role`));
+  head.appendChild(tile);
+
+  const costTile = el('div', 'tile');
+  costTile.appendChild(el('div', 'tile-label', 'Office cost'));
+  costTile.appendChild(el('div', 'tile-value', `$${(tokens.usage && tokens.usage.cost ? tokens.usage.cost : 0).toFixed(2)}`));
+  costTile.appendChild(el('div', 'tile-sub', `${compact(tokens.usage ? tokens.usage.total : 0)} all-time`));
+  head.appendChild(costTile);
+  wrap.appendChild(head);
+
+  // Each role carries its own 2M daily budget. A role at its limit is
+  // refused work, so the spend per role is what to watch.
+  if (roleRows.length) {
+    wrap.appendChild(el('div', 'muted-note', `Office spend today by role (limit ${compact(roleBudget)} each)`));
+    for (const r of roleRows.slice(0, 6)) {
+      const used = r.todayAutopilotTokens || 0;
+      const row = el('div', 'token-row');
+      row.appendChild(el('span', 'token-role', r.name || r.matrixRole));
+      const bar = el('div', 'token-bar');
+      const fill = el('div', 'token-fill');
+      const max = roleRows[0].todayAutopilotTokens || 1;
+      fill.style.width = `${Math.max(2, Math.round((used / max) * 100))}%`;
+      if (roleBudget && used >= roleBudget) fill.style.background = 'var(--danger)';
+      bar.appendChild(fill);
+      row.appendChild(bar);
+      row.appendChild(el('span', 'token-val', compact(used)));
+      wrap.appendChild(row);
+    }
+  } else {
+    wrap.appendChild(el('div', 'muted-note', 'No office spend recorded today'));
+  }
+  return wrap;
+}
+
+// Owner channel: connection state, decisions waiting on the owner, and the
+// one-time setup for the notification transport.
+function renderOwnerChannel() {
+  const box = document.getElementById('popup-client');
+  const stateEl = document.getElementById('popup-client-state');
+  if (!box) return;
+  box.innerHTML = '';
+  const cs = liveClient;
+  if (stateEl) stateEl.textContent = cs ? (cs.configured ? 'connected' : 'not connected') : '';
+
+  if (!cs) {
+    box.appendChild(el('div', 'muted-note', 'Owner channel unavailable'));
+    return;
+  }
+
+  if (!cs.configured) {
+    box.appendChild(el('div', 'muted-note', 'Connect a notification channel to receive decisions and status reports.'));
+    const input = el('input');
+    input.placeholder = 'Paste bot token (from @BotFather)';
+    input.style.cssText = 'background:#0b1220;color:var(--text);border:1px solid var(--border);border-radius:8px;padding:6px;font-size:10px;width:100%;margin-top:4px;';
+    const btn = el('button', null, 'Connect');
+    btn.style.cssText = 'background:#0ea5e9;color:#06233a;border:none;border-radius:8px;padding:6px 10px;font-size:10px;font-weight:700;cursor:pointer;margin-top:5px;width:100%;';
+    const note = el('div', 'muted-note');
+    btn.onclick = async () => {
+      btn.textContent = 'Connecting...';
+      const r = await fetch('/api/client/setup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ botToken: input.value.trim() }) });
+      const j = await r.json();
+      btn.textContent = 'Connect';
+      note.textContent = j.ok ? `Connected as @${j.bot.username}. Send /start to your bot to finish pairing.` : (j.error || 'failed');
+    };
+    box.appendChild(input);
+    box.appendChild(btn);
+    box.appendChild(note);
+    return;
+  }
+
+  const line = el('div', 'muted-note', `Connected${cs.username ? ' as @' + cs.username : ''} · chat ${cs.chatId} · daily report ${cs.reportHour}:00`);
+  box.appendChild(line);
+
+  const pending = cs.pendingDecisions || [];
+  if (pending.length) {
+    box.appendChild(el('div', 'muted-note', `${pending.length} decision(s) waiting on you`));
+    for (const d of pending.slice(0, 5)) {
+      const card = el('div', 'decision');
+      card.appendChild(el('div', 'decision-q', d.question));
+      if (d.context) card.appendChild(el('div', 'muted-note', d.context));
+      const opts = el('div', 'decision-opts');
+      for (const o of d.options || []) {
+        const b = el('button', 'decision-opt', o.label);
+        b.onclick = async () => {
+          b.disabled = true;
+          b.textContent = '...';
+          await fetch('/api/client/decision/answer', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: d.id, option: o.id }) });
+          syncOpenCodeLive();
+        };
+        opts.appendChild(b);
+      }
+      card.appendChild(opts);
+      box.appendChild(card);
+    }
+  } else {
+    box.appendChild(el('div', 'muted-note', 'No decisions waiting on you.'));
+  }
+}
+
+function updatePopup() {
+  const agDiv = document.getElementById('popup-agents');
+  const feedDiv = document.getElementById('popup-feed');
+  const auditDiv = document.getElementById('popup-audit');
+  const runDiv = document.getElementById('popup-run');
+  const teamCountEl = document.getElementById('popup-team-count');
+  if (!agDiv || !feedDiv) return;
+  agDiv.innerHTML = '';
+  feedDiv.innerHTML = '';
+  if (auditDiv) auditDiv.innerHTML = '';
+  if (runDiv) runDiv.innerHTML = '';
+  const source = (typeof agents !== 'undefined' && agents.length) ? agents : AGENTS;
+  if (teamCountEl) teamCountEl.textContent = `${source.length} online`;
+  for (const r of source) {
+    const d = document.createElement('div');
+    d.className='agent';
+    d.innerHTML = `<div style="width:22px;height:22px;border-radius:6px;background:#${r.color.toString(16).padStart(6,'0')};display:grid;place-items:center;font-size:9px;color:#0b1220;font-weight:700;flex-shrink:0;">${r.init}</div><div><div style="font-size:11px;font-weight:600;">${r.name}</div><div style="font-size:9px;color:var(--muted);">${r.role}</div><div style="font-size:9px;color:#93c5fd;">${r.status || 'idle'}${r.phase ? ` · ${r.phase}` : ''}${r.task ? ` · ${r.task}` : ''}</div></div>`;
+    agDiv.appendChild(d);
+  }
+  for (const item of feedLines.slice(0, 20)) {
+    const clone = document.createElement('div');
+    clone.className='line';
+    clone.style.cssText = 'font-size:9px;padding:2px 0;';
+    clone.innerHTML = `<span class="time">${item.time}</span><div><span class="agent">${item.who}</span> <span class="action">${item.text}</span></div>`;
+    feedDiv.appendChild(clone);
+  }
+  if (runDiv) {
+    if (liveRun?.runID) {
+      runDiv.innerHTML = `<div style="font-size:10px;color:var(--muted)">Run: <b style="color:var(--text)">${liveRun.runID}</b> · ${liveRun.status || 'started'}</div><div style="font-size:10px;color:var(--muted)">Goal: ${liveRun.goal || '-'}</div>`;
+    } else {
+      runDiv.innerHTML = `<div style="font-size:10px;color:var(--muted)">No active run</div>`;
+    }
+  }
+  if (auditDiv) {
+    const rows = liveDelegations.slice(0, 12);
+    if (!rows.length) {
+      auditDiv.innerHTML = `<div style="font-size:10px;color:var(--muted)">No subagent calls captured yet</div>`;
+    } else {
+      for (const r of rows) {
+        const line = document.createElement('div');
+        line.style.cssText = 'font-size:10px;padding:4px 0;border-bottom:1px dashed rgba(148,163,184,.12);';
+        line.innerHTML = `<span style="color:#93c5fd">${r.subagent || 'subagent'}</span> · <span style="color:var(--muted)">${r.status || 'ok'}</span><div style="color:var(--text)">${r.description || ''}</div>`;
+        auditDiv.appendChild(line);
+      }
+    }
+  }
+  renderBoard(liveAgency);
+  renderEscalations(liveAgency);
+  renderWorkload(liveAgency);
+  renderMetrics(liveAgency);
+  renderOwnerChannel();
+}
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('#menu-popup') && !e.target.closest('button')) {
+    document.getElementById('menu-popup').classList.remove('active');
+  }
+});
+window.addEventListener('resize', () => {
+  const w = container.clientWidth, h = container.clientHeight;
+  if (w && h) { camera.aspect = w/h; camera.updateProjectionMatrix(); renderer.setSize(w,h); }
+});
+</script>
+
+<div id="menu-popup" class="popup">
+  <h3>Orchestrator</h3>
+  <div style="display:grid;gap:6px;margin-bottom:10px;">
+    <input id="goal-input" placeholder="Goal (eg: Build HRIS product)" style="background:#0b1220;color:var(--text);border:1px solid var(--border);border-radius:8px;padding:8px;font-size:11px;" />
+    <textarea id="goal-desc" placeholder="Starter context / description" rows="3" style="background:#0b1220;color:var(--text);border:1px solid var(--border);border-radius:8px;padding:8px;font-size:11px;resize:vertical;"></textarea>
+    <button onclick="startGoalFromMenu()" style="background:#0ea5e9;color:#06233a;border:none;border-radius:8px;padding:7px 10px;font-size:11px;font-weight:700;cursor:pointer;">Start Orchestration</button>
+  </div>
+  <h3>Team <span id="popup-team-count" style="font-size:10px;color:var(--muted);"></span></h3>
+  <div id="popup-agents"></div>
+  <h3>Run Status</h3>
+  <div id="popup-run" style="margin-bottom:8px;"></div>
+  <h3>Sprint Board</h3>
+  <div id="popup-board" style="margin-bottom:8px;"></div>
+  <h3>Escalations <span id="popup-escalation-count" style="font-size:10px;color:var(--muted);"></span></h3>
+  <div id="popup-escalations" style="margin-bottom:8px;"></div>
+  <h3>Workload &amp; Resources</h3>
+  <div id="popup-workload" style="margin-bottom:8px;"></div>
+  <h3>Delivery Metrics</h3>
+  <div id="popup-metrics" style="margin-bottom:8px;"></div>
+  <h3>Owner Channel <span id="popup-client-state" style="font-size:10px;color:var(--muted);"></span></h3>
+  <div id="popup-client" style="margin-bottom:8px;"></div>
+  <h3>Delegation Audit</h3>
+  <div id="popup-audit" style="margin-bottom:8px;"></div>
+  <h3>Activity Feed</h3>
+  <div class="feed" id="popup-feed"></div>
+</div>
+
+</body>
+</html>
