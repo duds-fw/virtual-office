@@ -13,6 +13,8 @@ state/client.json
 node_modules/
 __pycache__/
 *.pyc
+.playwright-mcp/
+graphify-out/
 
 # OS noise
 .DS_Store
