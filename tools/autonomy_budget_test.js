@@ -154,6 +154,35 @@ function freshUsage() {
     })());
   }
 
+  console.log('--- the token budget does not refuse a tick that has spent nothing ---');
+  {
+    const BUDGET = 34_000_000;
+    const ROLE_BUDGET = 2_000_000;
+
+    // No role spend recorded yet: the empty set must not read as "all roles
+    // are exhausted". This case refused every tick while the office was idle.
+    const idle = office.tokenBudgetDecision({ spentToday: 0, budget: BUDGET, roleSpend: {}, roleBudget: ROLE_BUDGET });
+    check('an idle office with no role spend is allowed to tick', idle.allowed === true, JSON.stringify(idle));
+    check('an empty role set is not "all roles exhausted"', idle.allRolesExhausted === false);
+    check('no role is reported exhausted when none has spent', idle.exhaustedRoles.length === 0);
+
+    const spent = office.tokenBudgetDecision({ spentToday: 10, budget: BUDGET, roleSpend: { software_engineer: 10 }, roleBudget: ROLE_BUDGET });
+    check('a role with spend is still allowed to tick', spent.allowed === true, JSON.stringify(spent));
+
+    const over = office.tokenBudgetDecision({ spentToday: BUDGET + 1, budget: BUDGET, roleSpend: {}, roleBudget: ROLE_BUDGET });
+    check('the daily token budget still refuses a tick that spent too much', over.allowed === false);
+    check('the daily token budget is the reason, not the roles', over.allRolesExhausted === false);
+
+    const oneLeft = office.tokenBudgetDecision({ spentToday: 0, budget: BUDGET, roleSpend: { software_engineer: ROLE_BUDGET, ai_engineer: 5 }, roleBudget: ROLE_BUDGET });
+    check('one exhausted role out of two does not stop the office', oneLeft.allowed === true, JSON.stringify(oneLeft));
+    check('the exhausted role is named', oneLeft.exhaustedRoles.length === 1 && oneLeft.exhaustedRoles[0] === 'software_engineer');
+
+    const allGone = office.tokenBudgetDecision({ spentToday: 0, budget: BUDGET, roleSpend: { software_engineer: ROLE_BUDGET, ai_engineer: ROLE_BUDGET }, roleBudget: ROLE_BUDGET });
+    check('every role exhausted stops the office', allGone.allowed === false);
+    check('every exhausted role is named', allGone.exhaustedRoles.length === 2);
+    check('"all roles exhausted" is what stopped it', allGone.allRolesExhausted === true);
+  }
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail === 0 ? 0 : 1);
 })();

@@ -282,28 +282,55 @@ function recordAutonomyRefusal(usage, reason, consumer = 'ticker') {
  * it. The autopilot's own sessions and everything they delegate are what the
  * office is billed for.
  */
+/**
+ * The token budget decision, kept pure so it can be tested without the I/O.
+ *
+ * The office may tick unless it has spent its daily token budget, or unless
+ * every role it tracks is out of budget. "Every role" has to mean every role
+ * that exists: with no role spend recorded yet the set is empty, and an empty
+ * set is not "all exhausted" — it is "nothing has run out". The earlier
+ * comparison (`exhausted < total`) read that empty case as "all exhausted" and
+ * refused the tick, which is what kept the loop dead even after the step
+ * budget was fixed.
+ */
+function tokenBudgetDecision({ spentToday, budget, roleSpend, roleBudget }) {
+  const roles = Object.entries(roleSpend || {});
+  const exhaustedRoles = roles.filter(([, used]) => used >= roleBudget).map(([role]) => role);
+  const allRolesExhausted = roles.length > 0 && exhaustedRoles.length >= roles.length;
+  return {
+    allowed: spentToday < budget && !allRolesExhausted,
+    exhaustedRoles,
+    allRolesExhausted,
+  };
+}
+
 async function checkTokenBudget() {
   const usage = await fetchTokenUsage();
   const today = localDate();
+  // A failed usage fetch has no `today` field at all. The tick must survive it.
+  const todaySpend = Math.max(0, (usage.today && usage.today.autopilot) || 0);
   if (today !== tokenDay) {
     tokenDay = today;
-    tokensAtDayStart = usage.today.autopilot;
+    tokensAtDayStart = todaySpend;
   }
-  const spentToday = Math.max(0, usage.today.autopilot);
+  const spentToday = todaySpend;
   const budget = AUTONOMY.dailyTokenBudget;
   const roleBudget = agency.getRoleTokenBudget();
-  const exhaustedRoles = Object.entries(usage.todayByRole || {})
-    .filter(([, used]) => used >= roleBudget)
-    .map(([role]) => role);
+  const decision = tokenBudgetDecision({
+    spentToday,
+    budget,
+    roleSpend: usage.todayByRole || {},
+    roleBudget,
+  });
 
   return {
-    allowed: spentToday < budget && exhaustedRoles.length < Object.keys(usage.todayByRole || {}).length,
+    allowed: decision.allowed,
     spentToday,
     budget,
     percent: budget ? spentToday / budget : 0,
     roleBudget,
     roleSpend: usage.todayByRole || {},
-    exhaustedRoles,
+    exhaustedRoles: decision.exhaustedRoles,
     pendingDecisions: agency.pendingDecisions(),
     usage,
   };
@@ -1716,4 +1743,5 @@ module.exports = {
   releaseAutonomyStep,
   recordAutonomyRefusal,
   migrateAutonomyUsage,
+  tokenBudgetDecision,
 };
