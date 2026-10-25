@@ -17,6 +17,7 @@ const briefing = require('./briefing');
 const tokenSavings = require('./token-savings');
 const capacity = require('./capacity');
 const journal = require('./activity-journal');
+const { createAvailability } = require('./provider-availability');
 
 const STATE_DIR = path.join(__dirname, 'state');
 const AUTONOMY_KILL_FILE = path.join(__dirname, '.autonomy_stop');
@@ -54,6 +55,16 @@ const AUTONOMY = {
   dailyTokenBudget: 34_000_000,
   startedAt: Date.now()
 };
+
+// How long the office waits before it retries parked work. A provider that
+// said no must not be asked again on every cycle — the retries are what burn
+// the quota it is short of.
+const QUEUE_RETRY_INTERVAL_MS = 5 * 60 * 1000;
+
+// How long the office waits for the model's answer before it judges the tick.
+// The prompt returns immediately; the answer arrives later.
+const VERDICT_WAIT_MS = 90 * 1000;
+const VERDICT_POLL_MS = 2500;
 
 let liveCache = { ts: 0, data: null, error: null };
 let goalRuns = [];
@@ -370,7 +381,30 @@ function recordDailyStandup() {
   }
 }
 
-async function runAutonomyTick({ fromQueue = false } = {}) {
+/**
+ * One tick at a time.
+ *
+ * The provider counts concurrent requests against a single quota, so two
+ * overlapping ticks come back as "usage limit reached". The office read that
+ * as an exhausted account and parked the work forever. The guard is the fix:
+ * the office runs its own work sequentially.
+ */
+let autonomyTickInFlight = null;
+
+async function runAutonomyTick(options = {}) {
+  if (autonomyTickInFlight) {
+    console.log('[autonomy] tick already in flight — skipping this one');
+    return { ok: false, reason: 'tick_in_flight' };
+  }
+  autonomyTickInFlight = runAutonomyTickInner(options);
+  try {
+    return await autonomyTickInFlight;
+  } finally {
+    autonomyTickInFlight = null;
+  }
+}
+
+async function runAutonomyTickInner({ fromQueue = false } = {}) {
   const consumer = fromQueue ? 'queue' : 'ticker';
   resetUsageIfNewDay();
   recordDailyStandup();
@@ -426,7 +460,7 @@ async function runAutonomyTick({ fromQueue = false } = {}) {
       recordAutonomyRefusal(autonomyUsage, 'no_provider', consumer, { name: 'modelProvider', value: 'none available' });
       saveUsage();
       console.log(`[autonomy] no provider available — queued as ${queued.id}`);
-      await notifyOwnerOfBlindness('No model provider can serve right now (free models and MiniMax are both exhausted). The tick is queued and will run automatically as soon as one frees up.');
+      await notifyOwnerOfProviderState('blind', 'No model provider can serve right now (free models and MiniMax are both exhausted). The tick is queued and will run automatically as soon as one frees up.');
       // Check again shortly — a provider may free up sooner than the drain cycle.
       setTimeout(() => { drainQueueOnce().catch(() => {}); }, 2 * 60 * 1000);
       return { ok: false, reason: 'no_provider', queued: queued.id };
@@ -519,35 +553,16 @@ async function runAutonomyTick({ fromQueue = false } = {}) {
 
       const args = ['api', 'session.prompt', '--param', `sessionID=${sessionID}`, '--data', JSON.stringify({ text: tickPrompt })];
       noteDelegation('opened', { sessionID, model: model.key, kind: 'autopilot_tick' });
-      execFile(OPENCODE_BIN, args, { cwd: '/home/opencode', timeout: 180000 }, async (err, stdout, stderr) => {
-        if (err) {
-          const msg = (stderr || err.message || '').slice(0, 240);
-          console.error('[autonomy] tick error:', msg);
-          noteDelegation('closed', { sessionID, outcome: 'failed', detail: msg.slice(0, 120) });
-          router.recordOutcome(model.key, false, msg);
-          if (router.isQuotaError(msg)) {
-            const queued = workQueue.enqueue({ kind: 'autopilot_tick', reason: `provider exhausted: ${msg.slice(0, 120)}` });
-            await notifyOwnerOfBlindness(`The model provider hit its usage limit. The tick is queued (${queued.id}) and resumes automatically when a provider frees up.`);
-          }
-          return;
-        }
-        // "sent ok" is not proof of work. Confirm the provider actually accepted it.
-        const health = await detectProviderHealth();
-        if (!health.ok && health.quotaExhausted) {
-          console.error('[autonomy] provider quota exhausted — queueing tick');
-          router.recordOutcome(model.key, false, 'provider.quota: usage limit reached');
-          const queued = workQueue.enqueue({ kind: 'autopilot_tick', reason: 'provider quota exhausted' });
-          await notifyOwnerOfBlindness(`The model provider hit its usage limit. The tick is queued (${queued.id}) and resumes automatically as soon as one frees up.`);
-          return;
-        }
-        router.recordOutcome(model.key, true);
-        noteDelegation('closed', { sessionID, outcome: 'served', model: model.key });
-        console.log(`[autonomy] tick served by ${model.key}`);
-        // Something may have crossed a threshold only the owner can authorise.
-        await checkAuthority();
-      });
+      const served = await promptAutopilot({ sessionID, model, args });
+      if (!served.ok && !fromQueue) {
+        // The ticker path owns the retry. The queue keeps one waiting item of
+        // this kind, so repeated failures park one item, not one per failure.
+        workQueue.enqueue({ kind: 'autopilot_tick', reason: `tick failed: ${served.reason}` });
+      }
+      return served.ok
+        ? { ok: true, sessionID, model: model.key }
+        : { ok: false, reason: served.reason, model: model.key };
     }
-    return { ok: true, sessionID, model: model.key };
   } finally {
     // The claim only counts if the tick actually fired.
     if (!fired) {
@@ -558,25 +573,166 @@ async function runAutonomyTick({ fromQueue = false } = {}) {
 }
 
 /**
- * Tell the owner the office has stopped working, and why.
- * Only fires when the channel is configured and the problem is new, so it
- * cannot spam them every tick.
+ * Send one tick and wait for the provider's verdict.
+ *
+ * `session.prompt` exits 0 as soon as the request is accepted; the provider
+ * can still refuse it, and the refusal lands on the assistant message. The
+ * office has to read that verdict — otherwise a refused tick is recorded as
+ * work that happened, the queue never learns the provider said no, and every
+ * retry walks into the same wall.
  */
-let lastBlindnessNotice = 0;
-async function notifyOwnerOfBlindness(reason) {
-  const now = Date.now();
-  if (now - lastBlindnessNotice < 30 * 60 * 1000) return;   // at most every 30 min
-  lastBlindnessNotice = now;
-  const cfg = client.status();
-  if (!cfg.configured) return;
-  await client.send([
-    '<b>The office has stopped working.</b>',
-    '',
-    reason,
-    '',
-    `Last healthy tick: ${autonomyUsage.lastTickAt ? new Date(autonomyUsage.lastTickAt).toLocaleString() : 'unknown'}`,
-    'Everything else (board, metrics, budget) keeps running — only new work is paused.',
-  ].join('\n'));
+async function promptAutopilot({ sessionID, model, args }) {
+  const before = await lastMessageId(sessionID);
+  let stdout = '';
+  try {
+    stdout = await new Promise((resolve, reject) => {
+      execFile(OPENCODE_BIN, args, { cwd: '/home/opencode', timeout: 180000 }, (err, out, stderr) => {
+        if (err) return reject(new Error(stderr || err.message));
+        resolve(out || '');
+      });
+    });
+  } catch (e) {
+    const msg = String(e.message || e).slice(0, 240);
+    console.error('[autonomy] tick error:', msg);
+    noteDelegation('closed', { sessionID, outcome: 'failed', detail: msg.slice(0, 120) });
+    router.recordOutcome(model.key, false, msg);
+    if (router.isQuotaError(msg)) {
+      await notifyOwnerOfProviderState('blind', `The model provider refused the tick: ${msg.slice(0, 140)}`);
+    }
+    return { ok: false, reason: 'prompt_failed' };
+  }
+
+  const verdict = await providerVerdict(sessionID, stdout, before);
+  if (!verdict.ok) {
+    console.error('[autonomy] provider refused the tick:', verdict.error);
+    noteDelegation('closed', { sessionID, outcome: 'failed', detail: String(verdict.error).slice(0, 120) });
+    router.recordOutcome(model.key, false, verdict.quotaExhausted
+      ? 'provider.quota: usage limit reached'
+      : String(verdict.error).slice(0, 120));
+    await notifyOwnerOfProviderState('blind', verdict.quotaExhausted
+      ? 'The model provider hit its usage limit. Queued work waits and resumes automatically when it frees up.'
+      : `The model provider failed the tick: ${String(verdict.error).slice(0, 140)}`);
+    return { ok: false, reason: verdict.quotaExhausted ? 'provider_quota' : 'provider_refused' };
+  }
+
+  router.recordOutcome(model.key, true);
+  noteDelegation('closed', { sessionID, outcome: 'served', model: model.key });
+  console.log(`[autonomy] tick served by ${model.key}`);
+  // A tick that ran pays the tick the queue was holding.
+  const settled = workQueue.settle('autopilot_tick', 'served by the tick');
+  if (settled) console.log(`[queue] ${settled} owed tick(s) settled`);
+  await notifyOwnerOfProviderState('working', `The office is serving work again on ${model.key}.`);
+  // Something may have crossed a threshold only the owner can authorise.
+  await checkAuthority();
+  return { ok: true };
+}
+
+/**
+ * Read the provider's verdict on one prompt.
+ *
+ * The verdict comes from the response of the prompt itself and from the last
+ * messages of the session the office just used. Reading somebody else's
+ * session would make the office judge its provider by that person's traffic —
+ * one quota error in the owner's conversation blinded the office while its
+ * own tick was healthy.
+ */
+async function providerVerdict(sessionID, stdout, beforeId, { messagesFn = null } = {}) {
+  // 1. The response of the prompt itself. A refusal can be reported here.
+  let message = null;
+  try {
+    const parsed = JSON.parse(stdout || '{}');
+    const data = parsed && parsed.data ? parsed.data : parsed;
+    message = errorOf(data);
+  } catch (e) { /* not JSON — the session check below still applies */ }
+
+  // 2. The model's answer. `session.prompt` returns before the model has
+  //    answered, so the verdict is the assistant's message: a refusal lands
+  //    there, and reading the session before it arrives reads "ok" every
+  //    time and hides a dead provider behind a healthy-looking office.
+  const deadline = Date.now() + VERDICT_WAIT_MS;
+  while (!message && Date.now() < deadline) {
+    let msgs = [];
+    try {
+      msgs = messagesFn ? await messagesFn(sessionID) : await sessionMessages(sessionID, 6);
+    } catch (e) {
+      msgs = [];
+    }
+    const fresh = beforeId ? msgs.filter((m) => m && m.id && m.id !== beforeId) : msgs.slice(-2);
+    for (const m of fresh) {
+      const err = errorOf(m);
+      if (err) { message = err; break; }
+    }
+    if (message) break;
+    const answered = fresh.filter((m) => m && m.type === 'assistant').pop();
+    if (answered) break;              // the model answered, and it is not a refusal
+    await new Promise((r) => setTimeout(r, VERDICT_POLL_MS));
+  }
+
+  const quota = !!message && /usage limit|quota|credits|insufficient|subscribe|free usage/i.test(message);
+  return { ok: !message, error: message, quotaExhausted: quota };
+}
+
+/** The messages of a session, newest last. */
+async function sessionMessages(sessionID, limit = 6) {
+  const raw = await runOpenCode(['api', 'session.message.list', '--param', `sessionID=${sessionID}`, '--param', `limit=${limit}`]);
+  const parsed = JSON.parse(raw);
+  return parsed.data || parsed.messages || [];
+}
+
+/** The id of the last message in a session, so a later read can spot new ones. */
+async function lastMessageId(sessionID) {
+  try {
+    const msgs = await sessionMessages(sessionID, 2);
+    return msgs.length ? (msgs[msgs.length - 1].id || null) : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
+ * The failure text carried by one provider message, or null when it succeeded.
+ *
+ * The provider reports a refusal in more than one place — a top-level
+ * `error`, a `finish` of "error", or an error part inside the content — so
+ * all three are read. Missing one is how a refused tick gets recorded as
+ * work that happened.
+ */
+function errorOf(message) {
+  if (!message || typeof message !== 'object') return null;
+  const info = message.info && typeof message.info === 'object' ? message.info : message;
+  if (info.error) {
+    const e = info.error;
+    return String(e.message || e.type || e.name || JSON.stringify(e)).slice(0, 200);
+  }
+  if (info.finish === 'error' || info.rawFinish === 'error') {
+    const parts = Array.isArray(info.content) ? info.content : [];
+    for (const p of parts) {
+      if (p && p.error) return String(p.error.message || p.error.type || 'provider error').slice(0, 200);
+    }
+    return 'provider error';
+  }
+  const parts = Array.isArray(info.content) ? info.content : (Array.isArray(info.parts) ? info.parts : []);
+  for (const p of parts) {
+    if (p && p.error) return String(p.error.message || p.error.type || 'provider error').slice(0, 200);
+  }
+  return null;
+}
+
+/**
+ * Owner-facing provider availability. The rule of *when* to speak lives in
+ * provider-availability.js so it can be tested; this is only the channel.
+ */
+const availability = createAvailability({
+  send: async (text) => {
+    const cfg = client.status();
+    if (!cfg.configured) return false;
+    await client.send(text);
+    return true;
+  },
+});
+
+function notifyOwnerOfProviderState(state, reason) {
+  return availability.report(state, { reason, queued: workQueue.pending().length });
 }
 
 /**
@@ -612,10 +768,37 @@ async function getAutopilotSession(modelKey) {
   return created.sessionID;
 }
 
+/**
+ * The id of the office's own autopilot session, if it has one.
+ */
+function autopilotSessionID() {
+  try {
+    if (fs.existsSync(AUTOPILOT_SESSION_FILE)) {
+      const saved = JSON.parse(fs.readFileSync(AUTOPILOT_SESSION_FILE, 'utf8'));
+      return (saved && saved.sessionID) || null;
+    }
+  } catch (e) { /* no usable session file */ }
+  return null;
+}
+
+/**
+ * Is there a tick slot left in this hour?
+ *
+ * Checked before the office spends a provider probe: a probe is a real model
+ * call, and a tick that cannot run is not worth one.
+ */
+function autonomyTickSlotAvailable() {
+  const cutoff = Date.now() - 60 * 60 * 1000;
+  const used = (autonomyUsage.tickTimestamps || []).filter((t) => t > cutoff).length;
+  return used < autonomyBudgetConfig().maxTicksPerHour;
+}
+
 function startAutonomy() {
   if (!AUTONOMY.enabled) return;
   if (autonomyTimer) clearInterval(autonomyTimer);
-  autonomyTimer = setInterval(runAutonomyTick, AUTONOMY.intervalMs);
+  autonomyTimer = setInterval(() => {
+    runAutonomyTick().catch((e) => console.error('[autonomy] tick failed:', e.message));
+  }, AUTONOMY.intervalMs);
   console.log(`[autonomy] started: every ${AUTONOMY.intervalMs/60000}min, max ${AUTONOMY.maxStepsPerDay} steps/day, kill via ${AUTONOMY_KILL_FILE}`);
 }
 
@@ -1030,12 +1213,16 @@ async function handleClientCommand(cmd) {
  * out). The office must notice it is blind rather than reporting "sent ok"
  * while nothing happens.
  */
-async function detectProviderHealth() {
-  const probeSession = process.env.ACTIVE_SESSION_ID || 'ses_e974f9b88ffeodUJEaNJHwlwsM';
+async function detectProviderHealth(sessionID) {
+  // The verdict must come from the session the office itself used. Reading a
+  // different session makes the office judge its provider by someone else's
+  // traffic — one quota error in the owner's conversation blinded the office
+  // while its own tick was healthy.
+  const probeSession = sessionID || autopilotSessionID() || process.env.ACTIVE_SESSION_ID || 'ses_e974f9b88ffeodUJEaNJHwlwsM';
   try {
-    const raw = await runOpenCode(['api', 'session.message.list', '--param', `sessionID=${probeSession}`, '--param', 'limit=6']);
+    const raw = await runOpenCode(['api', 'session.message.list', '--param', `sessionID=${probeSession}`, '--param', 'limit=4']);
     const parsed = JSON.parse(raw);
-    const msgs = (parsed.data || parsed.messages || []).slice(-6);
+    const msgs = (parsed.data || parsed.messages || []).slice(-2);
     let quota = false;
     for (const m of msgs) {
       const err = m.error;
@@ -1138,25 +1325,39 @@ async function reapStuckSubagents() {
  * well as on its own cadence.
  */
 async function drainQueueOnce() {
-  if (!workQueue.pending().length) return { drained: 0, remaining: 0 };
-  if (isAutonomyStopped()) return { drained: 0, remaining: workQueue.pending().length };
+  const waiting = workQueue.pending();
+  if (!waiting.length) return { drained: 0, remaining: 0 };
+  if (isAutonomyStopped()) return { drained: 0, remaining: waiting.length };
+  // The ticker is the office's heartbeat; the queue is the backstop for when
+  // the heartbeat could not run. When the heartbeat is alive the queue waits —
+  // otherwise the queue competes with the ticker for the same hourly budget,
+  // and every probe it spends is a provider call the office cannot afford.
+  if (autonomyUsage.lastTickAt && Date.now() - autonomyUsage.lastTickAt < AUTONOMY.intervalMs) {
+    return { drained: 0, remaining: waiting.length };
+  }
+  // Nothing is due yet. Do not spend a provider probe on a retry that is not
+  // allowed to happen.
+  const due = waiting.some((i) => !i.lastAttemptAt || Date.now() - i.lastAttemptAt >= QUEUE_RETRY_INTERVAL_MS);
+  if (!due) return { drained: 0, remaining: waiting.length };
+  // No tick slot left in this hour: probing the ladder would cost a provider
+  // call for a tick that cannot run.
+  if (!autonomyTickSlotAvailable()) return { drained: 0, remaining: waiting.length };
   const model = await router.selectModel();
   if (!model) return { drained: 0, remaining: workQueue.pending().length };
   console.log(`[queue] provider ${model.key} available — draining queue`);
   const result = await workQueue.drain(async (item) => {
     if (item.kind === 'autopilot_tick') {
       const r = await runAutonomyTick({ fromQueue: true });
+      if (!r.ok && r.reason) item.reason = `waiting: ${r.reason}`;
       return r.ok === true;
     }
     return false;
-  }, { max: 3 });
+  }, { max: 3, minIntervalMs: QUEUE_RETRY_INTERVAL_MS });
   if (result.drained) {
     // Queue mechanics are the office's business, not the owner's. Only the
     // outcome matters, and only when it changes what the owner should know.
     console.log(`[queue] drained ${result.drained} item(s) on ${model.key}`);
-    if (result.drained >= 3) {
-      await notifyOwnerOfBlindness(`The office recovered and cleared ${result.drained} queued items of work on ${model.key}.`);
-    }
+    await notifyOwnerOfProviderState('working', `The office is serving work again on ${model.key}.`);
   }
   await checkAuthority();
   return result;
@@ -1838,6 +2039,14 @@ const server = http.createServer(async (req, res) => {
 if (require.main === module) {
   server.listen(PORT, HOST, () => {
     console.log(`Virtual Office running on http://${HOST}:${PORT} | autonomy every ${AUTONOMY.intervalMs/60000}min | kill: ${AUTONOMY_KILL_FILE}`);
+    // Ask the ladder once, in the background. Without it the dashboard shows
+    // "no model can serve" until the first tick, which reads as a dead office
+    // when the office is in fact waiting for its first heartbeat.
+    setTimeout(() => {
+      router.selectModel()
+        .then((m) => console.log(`[router] boot probe: ${m ? m.key : 'no model can serve'}`))
+        .catch((e) => console.error('[router] boot probe failed:', e.message));
+    }, 2000);
   });
 }
 
@@ -1856,4 +2065,6 @@ module.exports = {
   noteBudgetExhausted,
   noteProviderHealth,
   noteSubagents,
+  providerVerdict,
+  errorOf,
 };
