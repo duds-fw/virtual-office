@@ -237,6 +237,120 @@ provision" — planned conditions, controlled execution and documented results.)
 violated. The pipeline's invariant tests are `tools/sop-consistency-check.js`
 and the office's rule harness `tools/agency_rules_test.js`.
 
+### 3.5 The project stage machine
+
+`[designed]` — Source: `docs/design-project-pipeline.md` §2–§4, ratified as
+`docs/agency-decisions.md` D7.1–D7.4.
+
+This clause set is what makes the pipeline *controlled* rather than merely
+described. §3.3 says who decides; §3.4 says what must hold; **§3.5 says how a
+project legally moves.**
+
+#### 3.5.1 Project status vocabulary
+
+A project is in exactly one of these seven states:
+
+| Status | Meaning |
+|---|---|
+| `registered` | Created from an ask. Not yet scoped. Cannot be worked. |
+| `triaged` | Scoped: goal, budget, deadline, acceptance checklist. Cannot be worked. |
+| `planning` | A sprint is open and tasks are being sized. |
+| `delivering` | Sprint work is in flight. |
+| `acceptance` | Work is done; the checklist is being verified and decided. |
+| `done` | Accepted and closed. Terminal. |
+| `cancelled` | Abandoned. Reachable from any non-terminal state. Terminal. |
+
+`active` is **not** a project status. It survives only as a derived alias for
+`planning` and `delivering`, so existing readers do not break. New code
+**MUST NOT** write `active`.
+
+#### 3.5.2 Legal transitions
+
+```
+registered ──▶ triaged ──▶ planning ──▶ delivering ──▶ acceptance ──▶ done
+     │            │            │             │              │
+     └────────────┴────────────┴─────────────┴──────────────┴──▶ cancelled
+                                    ▲             │
+                                    └─────────────┘
+                              (acceptance → delivering:
+                               changes requested)
+```
+
+**SOP-3.6** — A project **MUST NOT** move to any status other than the
+transitions above. An attempt to do so **MUST** be refused with
+`illegal_project_transition`, and the refusal **MUST** name the attempted
+transition and the legal ones.
+
+**SOP-3.7** — `done` and `cancelled` are **terminal**. A project in either
+state **MUST NOT** be reopened. Reopening is a new project.
+
+#### 3.5.3 Transition table
+
+Each transition has one trigger, one initiator, and one precondition. All three
+**MUST** hold for the transition to succeed.
+
+| # | From → To | Trigger | Initiator | Precondition | Enforced by |
+|---|---|---|---|---|---|
+| T1 | `registered` → `triaged` | The ask is scoped | Product Owner | `acceptanceCriteria.length > 0` and every criterion has falsifiable `text` (P2) | `triage()` |
+| T2 | `triaged` → `planning` | Work is to be planned | Orchestrator | A sprint is opened for the project (P1) | `plan()` |
+| T3 | `planning` → `delivering` | The sprint is live | Orchestrator | Every task has an estimate and an eligible role | `deliver()` |
+| T4 | `delivering` → `acceptance` | Work is complete | Orchestrator | Every sprint task is `done` and carries a `deliverable` (P3) | `deliver()` |
+| T5 | `acceptance` → `delivering` | Changes requested | Product Owner | The specific unmet criteria are recorded | `accept()` |
+| T6 | `acceptance` → `done` | Delivery accepted | Product Owner, or the Client by ratification | Every criterion is `met === true`, every `metBy` task is `done` (P4); the acceptor is authorised (P8); the acceptor did not perform the delivery (P7) | `accept()` |
+| T7 | `any` → `cancelled` | Abandoned | Product Owner | The reason is recorded | `cancel()` |
+
+**SOP-3.8** — A transition whose precondition is not met **MUST** be refused,
+and the refusal **MUST** name the unmet precondition and the invariant it
+belongs to. A refusal that says only "failed" is not actionable and is a
+defect.
+
+#### 3.5.4 The `verify` step inside Acceptance
+
+The `acceptance` stage is not a single transition — it contains two acts that
+**MUST** happen in order, and both are within the stage:
+
+1. **Verification** — QA marks each criterion `met` / `unmet` against the
+   recorded evidence, and records what is missing for every `unmet` one.
+   *(SOP-11.3.)*
+2. **Decision** — the Product Owner accepts (T6) or requests changes (T5).
+
+**SOP-3.9** — A project **MUST NOT** leave `acceptance` for `done` until
+verification has been performed by a role other than the one that produced the
+delivery (P7). Acceptance without verification is not acceptance; it is a
+guess.
+
+**SOP-3.10** — Verification **MUST** be complete before the decision. A
+Product Owner **MUST NOT** accept a project whose criteria are unverified.
+
+#### 3.5.5 Transition error codes
+
+| Code | Meaning |
+|---|---|
+| `project_not_registered` | The project is not in a state that admits the requested transition. |
+| `no_acceptance_criteria` | T1 attempted with an empty checklist. |
+| `criterion_not_falsifiable` | T1 attempted with a criterion that is not a single true-or-false claim. |
+| `illegal_project_transition` | The requested transition is not in §3.5.2. |
+| `acceptance_not_met` | T6 attempted with an unmet criterion. |
+| `criterion_unverified` | T6 attempted before verification. |
+| `self_acceptance` | T6 attempted by a role that performed the delivery (P7). |
+| `acceptor_not_authorised` | T6 attempted by a role other than PO or Client (P8). |
+| `missing_deliverable` | T4 attempted with a task lacking a `deliverable` (P3). |
+
+**SOP-3.11** — These codes **MUST** be returned in the office's unified error
+envelope and **MUST** be distinguishable by the caller. A caller **MUST NOT**
+have to parse prose to learn which precondition failed.
+
+#### 3.5.6 Isolation
+
+**SOP-3.12** — A transition **MUST** affect only the project named. A second
+project's state, tasks, metrics, or capacity **MUST NOT** change as a
+consequence. *(P5, P6, and isolation test E1.)*
+
+**SOP-3.13** — When two projects contend for the same role's capacity, the
+Orchestrator sequences them (P9). A transition that advances one project past
+another contending for the same role **MUST** be preceded by an explicit
+sequencing decision.
+
 ---
 
 ## 4. The operating cycle
@@ -603,6 +717,12 @@ a **digest** item. It **MUST NOT** be escalated as an authority interrupt.
 **SOP-11.5** — The office **MUST NOT** mark its own work accepted
 (`SOP-3.2`, `SOP-3.3`).
 
+**SOP-11.8** — The acts of §11.3 map onto the stage machine as follows:
+verification happens **within** the `acceptance` stage (SOP-3.9), the Product
+Owner's decision is transition **T6** or **T5**, and the Client's ratification
+is the same transition **T6** performed by the Client rather than the PO. The
+transition table in §3.5.3 governs all three.
+
 ### 11.3 The Client's attention budget
 
 **SOP-11.6** — An authority interrupt **MUST** carry: the question, the
@@ -614,6 +734,47 @@ risk change, that **MUST** be raised as an authority item with the specific
 unmet criteria, the options, and the office's recommendation. *Reference:
 RFC 2119 §3.1 for the distinction between an instruction and a
 recommendation.*
+
+---
+
+## 11A. The pipeline's API surface
+
+`[designed]` — Source: `docs/design-project-pipeline.md` §5. Each endpoint is
+one transition from §3.5.3. This is the interface that enforces §3.5; a stage
+that has no endpoint cannot be entered, because the only way to change a
+project's status is through the endpoint that governs its transition.
+
+| Method | Path | Transition | Initiator role | Refused with |
+|---|---|---|---|---|
+| `POST` | `/api/agency/project` | — (creates `registered`) | Client / PO | — |
+| `POST` | `/api/agency/project/:id/triage` | T1 | Product Owner | `no_acceptance_criteria`, `criterion_not_falsifiable` |
+| `POST` | `/api/agency/project/:id/plan` | T2 | Orchestrator | `project_not_registered` |
+| `POST` | `/api/agency/project/:id/deliver` | T3, T4 | Orchestrator | `missing_deliverable` |
+| `POST` | `/api/agency/project/:id/verify` | (within `acceptance`) | QA | `criterion_unverified` |
+| `POST` | `/api/agency/project/:id/accept` | T5, T6 | PO or Client | `acceptance_not_met`, `criterion_unverified`, `self_acceptance`, `acceptor_not_authorised` |
+| `POST` | `/api/agency/project/:id/ratify` | T6 by Client | Client | `acceptor_not_authorised` |
+| `POST` | `/api/agency/project/:id/cancel` | T7 | Product Owner | — |
+| `GET` | `/api/agency/project/:id` | — | any | — |
+| `GET` | `/api/agency/projects` | — | any | — |
+| `GET` | `/api/agency/timeline` | — | any | — |
+
+**SOP-11A.1** — A project status **MUST** change only through the endpoint
+that governs its transition. No other route, no direct state write, and no
+read-modify-write of `state/` may set a project's status. `state/` is
+server-owned and is never the source of truth.
+
+**SOP-11A.2** — `GET /api/agency/metrics` **MUST** accept an optional
+`projectId` and default to the active project, so one project's numbers cannot
+be attributed to another (P6).
+
+**SOP-11A.3** — `GET /api/agency/timeline` **MUST** return the
+cross-project sequence: which project is next, which projects contend for a
+shared role, and the forecast slip for each. It is the Orchestrator's
+instrument, and it is what makes P9 observable rather than asserted.
+
+**SOP-11A.4** — A transition endpoint **MUST** return the project in its new
+state, including its updated criteria, delivery, and acceptance fields. A
+caller that cannot see the resulting state cannot verify the control worked.
 
 ---
 

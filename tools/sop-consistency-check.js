@@ -260,14 +260,224 @@ check('role guidelines have an owner approval sheet', /Owner approval/i.test(rol
 // ---------------------------------------------------------------------------
 console.log('\n== cross-references resolve ==');
 // Every SOP-x.y cited in the role guidelines must exist in the SOP.
-const cited = [...new Set([...roles.matchAll(/SOP-\d+(?:\.\d+)*/g)].map((m) => m[0]))];
+// A section reference like "SOP §3.5.3" is also a valid pointer: it names a
+// section heading rather than a numbered clause. Accept both forms, but
+// require that a bare clause-shaped token resolves.
+const cited = [...new Set([...roles.matchAll(/\bSOP-\d+(?:\.\d+)*/g)].map((m) => m[0]))];
 const unresolved = cited.filter((c) => !sop.includes(c));
 check(`all ${cited.length} SOP clause citations resolve`, unresolved.length === 0, unresolved.join(','));
+// Section-style pointers (SOP §x.y) must name a real section heading.
+const sectionRefs = [...new Set([...roles.matchAll(/SOP\s*§\s*(\d+(?:\.\d+)*)/g)].map((m) => m[1]))];
+for (const ref of sectionRefs) {
+  const heading = new RegExp(`^#{2,4}\\s*${ref.replace(/\./g, '\\.')}\\s+\\S`, 'm');
+  check(`SOP section pointer §${ref} resolves to a heading`, heading.test(sop));
+}
 
-// Every invariant P1..P9 referenced must be defined in the SOP.
+// Every invariant P1..P9 referenced must be DEFINED in the SOP — and defined
+// as a row in the §3.4 invariant table, not merely mentioned in prose. A
+// mention elsewhere (e.g. "*(Invariant P7.)*") does not define it.
 const invariants = [...new Set([...roles.matchAll(/\bP[1-9]\b/g)].map((m) => m[0]))].sort();
-const undefinedInv = invariants.filter((p) => !new RegExp(`\\*\\*${p}\\*\\*`).test(sop) && !sop.includes(`(${p})`) && !sop.includes(` ${p} `));
-check(`all ${invariants.length} invariant references are defined in the SOP`, undefinedInv.length === 0, undefinedInv.join(','));
+const invariantBlock = sop.match(/###\s*3\.4\s+The nine pipeline invariants([\s\S]*?)###\s*3\.5/);
+check('SOP has an invariant definition section', !!invariantBlock);
+const undefinedInv = invariants.filter((p) => {
+  if (!invariantBlock) return true;
+  return !new RegExp(`^\\|\\s*\\*\\*${p}\\*\\*\\s*\\|`, 'm').test(invariantBlock[1]);
+});
+check(`all ${invariants.length} invariant references are defined as table rows in §3.4`,
+  undefinedInv.length === 0, undefinedInv.join(','));
+// The table must contain exactly the nine invariants, and no others.
+if (invariantBlock) {
+  const rowInv = [...invariantBlock[1].matchAll(/^\|\s*\*\*(P\d+)\*\*\s*\|/gm)].map((m) => m[1]);
+  const expected = Array.from({ length: 9 }, (_, i) => `P${i + 1}`);
+  const extra = rowInv.filter((p) => !expected.includes(p));
+  const absent = expected.filter((p) => !rowInv.includes(p));
+  check('invariant table contains no invented invariant', extra.length === 0, extra.join(','));
+  check('invariant table contains all nine invariants', absent.length === 0, absent.join(','));
+}
+
+// ---------------------------------------------------------------------------
+console.log('\n== pipeline stage machine ==');
+// The SOP must define the full state machine, not just describe it. These are
+// the elements that make the pipeline *controlled*: the status vocabulary, the
+// legal transitions, the transition table, the error codes, and the API
+// surface that enforces them.
+
+// 3.5.1 — the seven project statuses.
+const PROJECT_STATUSES = [
+  'registered', 'triaged', 'planning', 'delivering', 'acceptance', 'done', 'cancelled',
+];
+check('SOP has a project status vocabulary section',
+  /###\s*3\.5\.1\s+Project status vocabulary/.test(sop));
+// The vocabulary must be a TABLE ROW, not merely a mention somewhere in the
+// prose — a status dropped from the table but still mentioned in P1/P2 must
+// be caught.
+const statusVocabBlock = sop.match(/####\s*3\.5\.1\s+Project status vocabulary([\s\S]*?)####\s*3\.5\.2/);
+check('project status vocabulary block located', !!statusVocabBlock);
+for (const s of PROJECT_STATUSES) {
+  const inVocab = statusVocabBlock
+    ? new RegExp(`^\\|\\s*\`${s}\`\\s*\\|`, 'm').test(statusVocabBlock[1])
+    : false;
+  check(`SOP status vocabulary table defines "${s}"`, inVocab,
+    `no table row for "${s}" in §3.5.1`);
+  // And it must be mentioned in the SOP at all.
+  check(`SOP mentions project status "${s}"`, new RegExp(`\`${s}\``).test(sop));
+}
+check('SOP states `active` is not a project status',
+  /`active` is \*\*not\*\* a project status/i.test(sop));
+
+// 3.5.2 / 3.5.3 — legal transitions and the transition table.
+check('SOP has a legal transitions diagram',
+  /####\s*3\.5\.2\s+Legal transitions/.test(sop));
+check('SOP has a transition table',
+  /####\s*3\.5\.3\s+Transition table/.test(sop));
+
+// Every transition T1..T7 must exist in the SOP and in the transition table.
+const TRANSITIONS = [
+  { id: 'T1', from: 'registered', to: 'triaged' },
+  { id: 'T2', from: 'triaged', to: 'planning' },
+  { id: 'T3', from: 'planning', to: 'delivering' },
+  { id: 'T4', from: 'delivering', to: 'acceptance' },
+  { id: 'T5', from: 'acceptance', to: 'delivering' },
+  { id: 'T6', from: 'acceptance', to: 'done' },
+  { id: 'T7', from: 'any', to: 'cancelled' },
+];
+const transitionTable = sop.match(/####\s*3\.5\.3\s+Transition table([\s\S]*?)####\s*3\.5\.4/);
+check('transition table block located', !!transitionTable);
+for (const t of TRANSITIONS) {
+  check(`SOP defines transition ${t.id}`, sop.includes(`**${t.id}**`) || sop.includes(`| ${t.id} |`),
+    `no ${t.id} in SOP`);
+  if (transitionTable) {
+    const row = transitionTable[1].split('\n').find((l) => l.trim().startsWith(`| ${t.id} `));
+    check(`transition table has a row for ${t.id}`, !!row);
+    if (row) {
+      check(`${t.id} row names its from-status (${t.from})`, row.includes(`\`${t.from}\``), row);
+      check(`${t.id} row names its to-status (${t.to})`, row.includes(`\`${t.to}\``), row);
+      // Each row must name a trigger, an initiator, a precondition and an enforcer.
+      const cells = row.split('|').map((c) => c.trim()).filter(Boolean);
+      check(`${t.id} row has trigger, initiator, precondition and enforcer`, cells.length >= 6,
+        `${cells.length} cells: ${cells.join(' | ')}`);
+    }
+  }
+}
+// The transition table must not contain an undefined transition id.
+if (transitionTable) {
+  const rowIds = [...transitionTable[1].matchAll(/^\|\s*(T\d+)\s*\|/gm)].map((m) => m[1]);
+  const known = TRANSITIONS.map((t) => t.id);
+  const unknown = rowIds.filter((id) => !known.includes(id));
+  check('transition table contains no undefined transition id', unknown.length === 0, unknown.join(','));
+  const missing = known.filter((id) => !rowIds.includes(id));
+  check('transition table contains every defined transition', missing.length === 0, missing.join(','));
+}
+
+// 3.5.5 — the nine transition error codes.
+const ERROR_CODES = [
+  'project_not_registered', 'no_acceptance_criteria', 'criterion_not_falsifiable',
+  'illegal_project_transition', 'acceptance_not_met', 'criterion_unverified',
+  'self_acceptance', 'acceptor_not_authorised', 'missing_deliverable',
+];
+check('SOP has a transition error codes section',
+  /####\s*3\.5\.5\s+Transition error codes/.test(sop));
+// Each code must be a TABLE ROW in §3.5.5, not merely mentioned in prose.
+const errorCodeBlock = sop.match(/####\s*3\.5\.5\s+Transition error codes([\s\S]*?)####\s*3\.5\.6/);
+check('transition error code block located', !!errorCodeBlock);
+for (const code of ERROR_CODES) {
+  const inTable = errorCodeBlock
+    ? new RegExp(`^\\|\\s*\`${code}\`\\s*\\|`, 'm').test(errorCodeBlock[1])
+    : false;
+  check(`SOP error code table defines "${code}"`, inTable,
+    `no table row for "${code}" in §3.5.5`);
+}
+// No code table row may name a code outside the known set.
+if (errorCodeBlock) {
+  const rowCodes = [...errorCodeBlock[1].matchAll(/^\|\s*`([a-z_]+)`\s*\|/gm)].map((m) => m[1]);
+  const unknown = rowCodes.filter((c) => !ERROR_CODES.includes(c));
+  check('SOP error code table contains no undefined code', unknown.length === 0, unknown.join(','));
+}
+
+// 3.5.4 — the verify step inside Acceptance.
+check('SOP has a verify-step section', /####\s*3\.5\.4\s+The `verify` step inside Acceptance/.test(sop));
+// Prose wraps across lines, so match against whitespace-normalised text.
+const sopFlatAll = sop.replace(/\s+/g, ' ');
+check('SOP states verification precedes the acceptance decision',
+  /Verification \*\*MUST\*\* be complete before the decision/i.test(sopFlatAll));
+check('SOP states verification is performed by a role other than the deliverer',
+  /verification has been performed by a role other than the one that produced the delivery/i.test(sopFlatAll));
+
+// 11A — the endpoint-to-transition mapping.
+check('SOP has an API surface section', /##\s*11A\.\s+The pipeline's API surface/.test(sop));
+const apiBlock = sop.match(/##\s*11A\.[\s\S]*?(?=\n##\s+12\.)/);
+check('API surface block located', !!apiBlock);
+if (apiBlock) {
+  // Every transition must be reachable through a named endpoint. An endpoint
+  // row may serve two transitions ("T3, T4"), so match the whole cell.
+  for (const t of TRANSITIONS) {
+    const cell = new RegExp(`\\|\\s*(?:[A-Z]\\d+,\\s*)*${t.id}(?:\\s*,|\\s*\\|)`, 'm');
+    check(`API surface maps a transition for ${t.id}`, cell.test(apiBlock[0]),
+      `no endpoint row references ${t.id}`);
+  }
+  // Each stage endpoint must be present.
+  for (const p of ['triage', 'plan', 'deliver', 'verify', 'accept', 'ratify', 'cancel']) {
+    check(`API surface has a /${p} endpoint`, apiBlock[0].includes(`/${p}`));
+  }
+  // Read endpoints named by SOP-11A.2 / 11A.3.
+  for (const p of ['/api/agency/project/:id', '/api/agency/projects', '/api/agency/timeline']) {
+    check(`API surface names ${p}`, apiBlock[0].includes(p));
+  }
+  check('API surface forbids direct status writes',
+    /No other route, no direct state write/.test(sop));
+}
+
+// ---------------------------------------------------------------------------
+console.log('\n== role guidelines cover pipeline stage transitions ==');
+// The roles that own transitions must have a procedure for them, and must
+// name the transitions they own.
+const stageOwners = [
+  { name: 'Orchestrator', owns: ['T2', 'T3', 'T4', 'T7'] },
+  { name: 'Product Owner', owns: ['T1', 'T5', 'T6', 'T7'] },
+];
+for (const owner of stageOwners) {
+  const sec = sections.find((s) => s.includes(`— \`${owner.name === 'Orchestrator'
+    ? 'orchestrator_lead' : 'product_owner_product_manager'}\``));
+  check(`role guidelines have a section for ${owner.name}`, !!sec);
+  if (!sec) continue;
+  for (const t of owner.owns) {
+    check(`${owner.name} names transition ${t}`, new RegExp(`\\b${t}\\b`).test(sec),
+      `${t} not mentioned in ${owner.name} section`);
+  }
+  check(`${owner.name} has a stage-transition procedure`,
+    /Moving a project through its stages/i.test(sec));
+  // A role must not claim to own another role's transitions. A mention inside a
+  // prohibition ("MUST NOT perform T1") or a consultation note ("Consult: the
+  // PO on ... T1") is correct, not a claim. Only an AFFIRMATIVE ownership
+  // statement counts as a claim.
+  // Prose wraps, so the prohibition and the verb it governs can sit on
+  // different lines — normalise to one line before matching.
+  const notOwn = owner.name === 'Orchestrator'
+    ? ['T1', 'T5', 'T6']
+    : ['T2', 'T3', 'T4'];
+  const secLines = sec.replace(/\s+/g, ' ').split(/(?<=\.)\s+/);
+  for (const t of notOwn) {
+    const claim = new RegExp(
+      `(?:owns?|owned by|performs?|initiates?|drives?)[^.]{0,80}\\b${t}\\b`, 'i');
+    const offending = secLines.filter((line) => {
+      if (!claim.test(line)) return false;
+      if (/MUST NOT|not the |belong to|Consult|consult/i.test(line)) return false;
+      return true;
+    });
+    check(`${owner.name} does not claim ${t}`, offending.length === 0, offending.join(' / '));
+  }
+}
+
+// QA owns the verify step and must not accept.
+const qaSec = sections.find((s) => s.includes('— `quality_assurance`'));
+check('role guidelines have a section for QA', !!qaSec);
+if (qaSec) {
+  check('QA owns the verify step', /verif/i.test(qaSec));
+  // QA produces a verdict and does not accept — either the "MUST NOT accept"
+  // form or the plain "QA does not accept" statement satisfies this.
+  check('QA states it does not accept',
+    /MUST NOT accept/i.test(qaSec) || /QA does not accept/i.test(qaSec));
+}
 
 // ---------------------------------------------------------------------------
 console.log('\n== no role invents a board field ==');

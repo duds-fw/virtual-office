@@ -313,3 +313,123 @@ Until the owner ratifies, nothing in either document overrides `AGENTS.md` or
 the decisions in this file. On ratification, the SOP and the guidelines become
 the office's procedure, the owner decision is recorded here as the ratification
 entry, and the signature sheets are completed.
+
+---
+
+## D8.1 — Closing the pipeline-control gap in the SOP and guidelines
+
+Recorded 2026-10-25, extending D8. The owner asked a precise question: *is the
+SOP and guideline already designed to control the pipeline?* The honest answer
+at the time D8 was written was **partial** — and the gap was worth recording
+because it is the same shape as D6.
+
+### The gap
+
+The first draft of the SOP controlled **who decides** (RACI in §3.3) and
+**what must hold** (invariants P1–P9 in §3.4). It did not control **the state
+machine that enforces it**. Specifically it lacked:
+
+1. The **project status vocabulary** — the seven legal states
+   (`registered|triaged|planning|delivering|acceptance|done|cancelled`) appeared
+   only inside invariant P1/P2. SOP §4.2 listed the *task* statuses. A reader
+   could not look up what a project's legal states were, or what `active` meant.
+2. The **legal transition set** — no section stated which transitions exist, so
+   no rule could forbid an illegal one.
+3. The **transition table** — no statement of each transition's trigger,
+   initiator, precondition and enforcer. Without a precondition per transition,
+   "controlled" is a claim rather than a control.
+4. The **transition error codes** — the design doc defined nine; the SOP
+   defined none, so a refusal had no agreed vocabulary.
+5. The **API surface** — nothing tied the state machine to the endpoints that
+   enforce it, which left open the possibility of a status changing by some
+   route other than the governing one.
+6. The **role procedures** — the Orchestrator and Product Owner had general
+   procedures but none for moving a project between stages.
+
+The office's own standard is D6's lesson: a written standard without
+enforcement is a reminder. A procedure that describes the pipeline without
+specifying the transitions is the same defect one layer up.
+
+### What was added
+
+**SOP §3.5 — the project stage machine** (clauses SOP-3.6 … SOP-3.13):
+
+- §3.5.1 — the seven-state project status vocabulary, with `active` demoted
+  to a derived alias for `planning`/`delivering`.
+- §3.5.2 — the legal transition diagram; `done` and `cancelled` terminal.
+- §3.5.3 — the transition table T1–T7, each with trigger, initiator,
+  precondition and enforcer. T1 triage (PO), T2 plan (Orchestrator), T3/T4
+  deliver (Orchestrator), T5 request changes (PO), T6 accept (PO or Client),
+  T7 cancel (PO).
+- §3.5.4 — the `verify` step inside Acceptance: QA verifies before the PO
+  decides, and the verifier is never the role that produced the delivery.
+- §3.5.5 — the nine transition error codes, each naming the transition and
+  invariant it belongs to.
+- §3.5.6 — isolation and cross-project sequencing (P5, P6, P9).
+
+**SOP §11A — the pipeline's API surface** (clauses SOP-11A.1 … SOP-11A.4): an
+endpoint-to-transition table, plus the rule that a project status may change
+*only* through the endpoint governing its transition. `GET /timeline` is named
+as the instrument that makes P9 observable rather than asserted.
+
+**Role guidelines** — two new procedures:
+
+- **R-01 Orchestrator, §5b** — drives T2, T3, T4, T7; refuses any transition
+  outside the legal set with `illegal_project_transition`; refuses a transition
+  whose precondition is not met, naming the unmet precondition and its
+  invariant; uses the governing endpoint, never a direct status write; confirms
+  the sequencing decision before advancing a project that contends with
+  another for the same role.
+- **R-03 Product Owner, §5b** — drives T1, T5, T6, T7. Triage requires a
+  non-empty falsifiable checklist. Request-changes names *what is missing* per
+  criterion. Acceptance checks the two authorisation preconditions (P7, P8)
+  before attempting the transition, and routes a scope/budget/risk change to
+  the Client as an authority item rather than accepting unilaterally or
+  escalating a clean delivery. Cancellation requires a recorded reason.
+
+The PO's accountabilities, decision rights and standard-of-work were extended
+to match, and the "Not the PO's" line now names T2/T3/T4 and the `verify`
+step explicitly so the boundary is stated rather than implied.
+
+### The guard
+
+`tools/sop-consistency-check.js` grew from 145 checks to **262**, adding
+assertions for: the seven project statuses as *table rows* in §3.5.1; the T1–T7
+transition table with a row per transition and a trigger/initiator/precondition/
+enforcer per row; the nine error codes as table rows; the verify-step ordering
+rules; the endpoint-to-transition mapping and the seven stage endpoints; the
+two role procedures and the transitions each role claims; the invariant table
+as table rows rather than prose mentions; and section-style (`SOP §3.5.3`)
+references resolving to real headings.
+
+Validated by mutation: **17 deliberate corruptions, all 17 caught** — the
+original eight (forbidden phase claim, false compliance claim, bogus gate id,
+wrong capacity, broken clause citation, deleted role section, invented
+escalation level, removed invariant) plus nine aimed at the new content
+(removed project status, removed transition row, removed error code, removed
+endpoint, a role claiming another's transition, lost transition procedure,
+permitted direct status write, invented error code, renamed invariant).
+
+Two defects in the checker itself were found and fixed while doing this — both
+were check bugs that would have made a control look stronger than it was:
+a template-literal escaping fault that made three new regexes match nothing
+(`\s` in a template literal collapses to `s`), and an invariant check that
+accepted a prose mention as a definition. A control that cannot fail is not a
+control, so each was fixed and re-tested rather than left.
+
+### What this does not change
+
+The pipeline remains **designed, not shipped**. §3.5 and §11A are marked
+`[designed]` and name `docs/design-project-pipeline.md` as their source. The
+code still creates projects with `status: 'active'`, still has no
+`acceptanceCriteria`, no `deliverable`, and no stage endpoints. The board's 15
+pipeline tasks (80h) remain the structural fix; the SOP now specifies precisely
+what those tasks must produce.
+
+### Standing rule (extended)
+
+The procedure and the code must agree. When the pipeline is implemented, §3.5
+and §11A change from `[designed]` to `[shipped]` with the implementing symbols
+named, and the consistency checker's assertions move from *document-shape* to
+*code-and-document agreement*. A procedure clause that no code enforces stays
+`[designed]`.

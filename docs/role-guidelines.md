@@ -122,8 +122,15 @@ pipeline moving, and its authority is the widest in the office.
    (SOP-5.5).
 6. Maintain the office's records and close projects with lessons recorded
    (SOP-15.1).
+7. Drive the project's stage transitions the Orchestrator owns — T2, T3, T4
+   and T7 — and refuse any transition outside the legal set (SOP-3.6).
+8. Maintain the cross-project timeline the API exposes at
+   `GET /api/agency/timeline` (SOP-11A.3).
 
 #### 5. Standard operating procedure
+
+**5a. The tick.**
+
 1. **Trigger:** an autonomy tick, a status change, or a new request.
 2. Read `GET /api/agency/state` for the board summary. **Do not** fetch task
    bodies or session exports — the board API already summarises (SOP-6.7).
@@ -137,20 +144,46 @@ pipeline moving, and its authority is the widest in the office.
 7. **Exit:** one task has moved, or the tick has recorded why nothing could
    move.
 
+**5b. Moving a project through its stages.**
+
+The Orchestrator owns transitions T2, T3, T4 and T7 (SOP §3.5.3). It **MUST NOT**
+perform T1 (the PO triages) or T5/T6 (the PO decides acceptance).
+
+1. **Trigger:** a project's work is ready to advance, or a project must be
+   abandoned.
+2. Read the project's current status and identify the intended transition from
+   §3.5.2. If the intended transition is not in that table, **refuse it** and
+   record `illegal_project_transition` (SOP-3.6).
+3. Check the transition's precondition (T2 — a sprint is open; T3 — every task
+   has an estimate and an eligible role; T4 — every sprint task is `done` and
+   carries a `deliverable`; T7 — a reason is recorded).
+4. If the precondition fails, **refuse the transition** and name the unmet
+   precondition and its invariant (SOP-3.8). A transition that half-succeeds
+   is worse than one that is refused.
+5. Call the endpoint that governs the transition (`plan`, `deliver`, `cancel`).
+   Do not write the status directly (SOP-11A.1).
+6. Before advancing a project that contends with another for the same role,
+   confirm the sequencing decision exists (SOP-3.13, P9).
+7. **Exit:** the project is in its new state, or the transition was refused with
+   a named cause.
+
 #### 6. Inputs / outputs / handoffs
 | Artefact | Producer | Consumer | Where |
 |---|---|---|---|
 | Sequencing decision | Orchestrator | All roles | Activity log |
 | Assignment | Orchestrator | Owner role | `task.ownerId` |
+| Stage transition | Orchestrator | PO, Client | Project status |
 | Escalation | Orchestrator | PO → Client | `escalations[]` |
 | Lesson | Orchestrator | All roles | `lessons[]` |
 | Budget report | Orchestrator | Client | Daily digest |
+| Cross-project timeline | Orchestrator | PO, Client | `GET /api/agency/timeline` |
 
 #### 7. Decision rights
 - **Decide alone:** sequencing within the timeline; which eligible role takes a
-  task; whether a blocked cause is valid; escalation level.
-- **Consult:** the PO on delivery priority; DevOps/SRE on capacity
-  constraints.
+  task; whether a blocked cause is valid; escalation level; whether a stage
+  precondition is met for T2, T3, T4, T7.
+- **Consult:** the PO on delivery priority and on transitions T1, T5, T6;
+  DevOps/SRE on capacity constraints.
 - **Escalate to Client:** contention that changes scope, budget, or a
   committed date (SOP-10.2).
 
@@ -307,8 +340,13 @@ decision, carried on the project rather than as a task the PO works.
 6. Raise a strategic decision when acceptance requires a scope, budget or risk
    change (SOP-2.2).
 7. Own the timeline **within** the project (SOP-10.2).
+8. Drive the project stage transitions the PO owns — T1, T5, T6 and T7 — and
+   refuse any transition whose precondition is not met (SOP-3.6, SOP-3.8).
 
 #### 5. Standard operating procedure
+
+**5a. Scoping and planning.**
+
 1. **Trigger:** a new ask, or a project enters `acceptance`.
 2. **Triage:** write the goal, the budget, the deadline, and the checklist.
    Each criterion is one sentence, true or false. State the verification.
@@ -323,6 +361,75 @@ decision, carried on the project rather than as a task the PO works.
 7. **Exit:** the project is accepted, returned to delivery with named gaps, or
    escalated with options.
 
+**5b. Moving a project through its stages.**
+
+The PO owns transitions T1 (triage), T5 (changes requested), T6 (accept), and
+T7 (cancel) (SOP §3.5.3). The PO **MUST NOT** perform T2, T3 or T4 — those
+belong to the Orchestrator — and **MUST NOT** perform the `verify` step, which
+belongs to QA (SOP-3.9).
+
+**T1 — `registered` → `triaged`.**
+
+1. **Trigger:** an ask arrives and the Client has authorised it.
+2. Write the goal, the budget, the deadline, and the acceptance checklist.
+   Each criterion is one sentence that is true or false, with its verification
+   named. A claim that cannot be written that way is a goal, not a criterion
+   (SOP-11.2).
+3. Check the checklist is non-empty and every criterion is falsifiable. If it
+   is not, **do not triage** — the transition would be refused with
+   `no_acceptance_criteria` or `criterion_not_falsifiable` (SOP-3.8).
+4. Call `POST /api/agency/project/:id/triage`. Do not write the status
+   directly (SOP-11A.1).
+5. **Exit:** the project is `triaged`, or the transition was refused with a
+   named cause.
+
+**T5 — `acceptance` → `delivering` (changes requested).**
+
+1. **Trigger:** verification is complete and at least one criterion is unmet.
+2. For **each** unmet criterion, name specifically what is missing. "Not
+   complete" is not a change request; "the dashboard filters by project but do
+   not persist the selection across a reload" is.
+3. Record the request against the project, and identify the work it creates.
+   A change request that names no work is a complaint, not a transition.
+4. Call `POST /api/agency/project/:id/accept` with the request. The project
+   returns to `delivering`.
+5. **Exit:** the project is `delivering` again with named gaps, or escalated
+   with options if meeting the criterion would change scope, budget or risk.
+
+**T6 — `acceptance` → `done` (accepted).**
+
+1. **Trigger:** verification is complete and every criterion is `met === true`.
+2. Confirm the two authorisation preconditions **before** attempting the
+   transition: the acceptor is the PO or the Client (P8), and the acceptor did
+   not perform the delivery (P7). If either fails, the transition **MUST** be
+   refused with `acceptor_not_authorised` or `self_acceptance` — do not
+   attempt it and hope (SOP-3.8).
+3. Confirm every referenced `metBy` task is `done` (P4).
+4. If acceptance would change scope, budget, or accepted risk, **do not accept
+   unilaterally.** Raise an authority item with the specific unmet
+   consequences, the options, and the office's recommendation; the Client
+   ratifies via `POST /api/agency/project/:id/ratify` (SOP-11.7, SOP-11A.1).
+5. Otherwise accept via `POST /api/agency/project/:id/accept` and report it to
+   the Client as a **digest** item — a clean delivery is not an authority
+   interrupt (SOP-11.4).
+6. **Exit:** the project is `done`, or the acceptance is escalated with options.
+
+**T7 — any → `cancelled` (abandoned).**
+
+1. **Trigger:** the work is to be abandoned.
+2. Record the reason. A cancellation without a reason is not a record.
+3. Check what is already committed — if cancelling strands completed work or
+   leaves spent budget unaccounted, report it with the cancellation.
+4. Call `POST /api/agency/project/:id/cancel`.
+5. **Exit:** the project is `cancelled` with its reason, or the cancellation
+   was escalated because it changes scope or budget.
+
+**Refusing a transition.** Where any of the above preconditions is not met,
+the PO **MUST** refuse the transition rather than force it, and **MUST** name
+the unmet precondition and the invariant it belongs to (SOP-3.8). A refused
+transition with a named cause is a working control; a forced transition is a
+silent breach.
+
 #### 6. Inputs / outputs / handoffs
 | Artefact | Producer | Consumer | Where |
 |---|---|---|---|
@@ -330,15 +437,18 @@ decision, carried on the project rather than as a task the PO works.
 | Scoped project | PO | Orchestrator | Project record |
 | Acceptance decision | PO | Orchestrator, Client | `acceptedBy`, `ratified` `[designed]` |
 | Change request | PO | Delivery role | Task re-opened |
+| Stage transition | PO | Orchestrator, Client | Project status |
+| Verification verdict | QA | PO | `acceptanceCriteria[].met` `[designed]` |
 
 #### 7. Decision rights
 - **Decide alone:** project scope within an agreed envelope; task estimates;
   acceptance of a met checklist; prioritisation within the project;
-  requesting changes.
+  requesting changes; whether a stage precondition is met for T1, T5, T6, T7.
 - **Consult:** QA on criteria verifiability; NetSec on release risk;
   Orchestrator on cross-project sequencing.
 - **Escalate to Client:** acceptance requiring a scope, budget or risk change;
   a budget overrun; a change to a committed date (SOP-5.5, SOP-11.7).
+- **Not the PO's:** T2, T3, T4 (Orchestrator); the `verify` step (QA).
 
 #### 8. Gates owned or approved
 `design_approval` — one of two eligible approver roles (SOP-4.5).
@@ -364,6 +474,11 @@ decision, carried on the project rather than as a task the PO works.
 - Every project leaves triage with a non-empty checklist (P2).
 - Every acceptance decision records who accepted and on what evidence.
 - No delivery is accepted with an unmet criterion (P4).
+- Every stage transition the PO made went through its governing endpoint, and
+  every refusal named the unmet precondition and its invariant (SOP-3.8,
+  SOP-11A.1).
+- No acceptance was performed by a role that produced the delivery (P7), and
+  no acceptance was performed by a role other than PO or Client (P8).
 
 #### 12. Standards reference
 ISO 9001:2015 §8.2.3 (review of requirements); PMBOK 7 principle "Deliver
