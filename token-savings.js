@@ -27,6 +27,22 @@ function run(cmd, args, timeoutMs = 20000) {
   });
 }
 
+/**
+ * RTK prints compact magnitudes ("5.7K", "1.2M"), not plain integers. A
+ * parser that expects digits alone reads them as no number at all, so the
+ * office reported "0 tokens saved" while RTK had in fact saved thousands.
+ * This is the one place that converts them.
+ */
+function parseCompact(value) {
+  if (value === undefined || value === null) return 0;
+  const m = String(value).trim().match(/^(-?\d+(?:\.\d+)?)\s*([KMB])?$/i);
+  if (!m) return 0;
+  const n = Number(m[1]);
+  if (!Number.isFinite(n)) return 0;
+  const scale = { K: 1e3, M: 1e6, B: 1e9 }[(m[2] || '').toUpperCase()] || 1;
+  return Math.round(n * scale);
+}
+
 /** Parse `rtk gain` output into numbers. */
 function parseRtkGain(text) {
   const out = {
@@ -41,24 +57,26 @@ function parseRtkGain(text) {
 
   const cmds = text.match(/Total commands:\s*(\d+)/);
   if (cmds) out.commands = Number(cmds[1]);
-  const saved = text.match(/Tokens saved:\s*(\d+)\s*\(([\d.]+)%\)/);
+  const saved = text.match(/Tokens saved:\s*(\d+(?:\.\d+)?\s*[KMB]?)\s*\(([\d.]+)%\)/i);
   if (saved) {
-    out.tokensSaved = Number(saved[1]);
+    out.tokensSaved = parseCompact(saved[1]);
     out.percent = Number(saved[2]);
   }
-  const inTok = text.match(/Input tokens:\s*(\d+)/);
-  if (inTok) out.inputTokens = Number(inTok[1]);
-  const outTok = text.match(/Output tokens:\s*(\d+)/);
-  if (outTok) out.outputTokens = Number(outTok[1]);
+  const inTok = text.match(/Input tokens:\s*(\d+(?:\.\d+)?\s*[KMB]?)/i);
+  if (inTok) out.inputTokens = parseCompact(inTok[1]);
+  const outTok = text.match(/Output tokens:\s*(\d+(?:\.\d+)?\s*[KMB]?)/i);
+  if (outTok) out.outputTokens = parseCompact(outTok[1]);
 
   // Per-command rows: " 1.  rtk ls docs                   2     58   57.4%     6ms"
-  const rowRe = /^\s*\d+\.\s+(.+?)\s{2,}(\d+)\s+(\d+)\s+([\d.]+)%/gm;
+  // The saved column is compact too ("2.1K"), so it goes through the same
+  // conversion — otherwise the largest saver parses as NaN and sorts nowhere.
+  const rowRe = /^\s*\d+\.\s+(.+?)\s{2,}(\d+)\s+(\d+(?:\.\d+)?\s*[KMB]?)\s+([\d.]+)%/gim;
   let m;
   while ((m = rowRe.exec(text)) !== null) {
     out.byCommand.push({
       command: m[1].trim().slice(0, 60),
       count: Number(m[2]),
-      saved: Number(m[3]),
+      saved: parseCompact(m[3]),
       percent: Number(m[4]),
     });
   }
@@ -160,4 +178,4 @@ async function collect({ spentTokens = 0 } = {}) {
   };
 }
 
-module.exports = { collect, parseRtkGain, compact };
+module.exports = { collect, parseRtkGain, parseCompact, compact };

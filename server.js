@@ -17,6 +17,7 @@ const briefing = require('./briefing');
 const tokenSavings = require('./token-savings');
 const capacity = require('./capacity');
 const journal = require('./activity-journal');
+const dailyWatch = require('./daily-watch');
 const { createAvailability } = require('./provider-availability');
 
 const STATE_DIR = path.join(__dirname, 'state');
@@ -817,6 +818,7 @@ if (require.main === module) {
   startAutonomy();
   startClientReports();
   startQueueDrain();
+  dailyWatch.startDailyWatch({ agency, autonomyStopped: isAutonomyStopped });
   client.startPolling(handleClientCommand);
   console.log(`[client] owner channel ${client.status().configured ? 'connected' : 'not configured — POST /api/client/setup'}`);
 }
