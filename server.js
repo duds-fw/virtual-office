@@ -153,7 +153,11 @@ function loadState() {
   }
   if (!Array.isArray(goalRuns)) goalRuns = [];
   if (!Array.isArray(projects)) projects = [];
+  // The split is a one-time migration. Write it down, so the record on disk
+  // says what the office is counting and the legacy total is not lost.
+  const hadSplitCounters = !!(autonomyUsage && Number.isFinite(autonomyUsage.queuedStepsToday));
   autonomyUsage = migrateAutonomyUsage(autonomyUsage);
+  if (!hadSplitCounters) saveUsage();
   resetUsageIfNewDay();
   if (projects.length === 0) {
     projects.push({
@@ -223,15 +227,22 @@ function autonomyBudgetConfig() {
  * own counter and can never spend the ticker's budget.
  */
 function autonomyBudget(usage, consumer = 'ticker', cfg = {}) {
-  if (cfg.stopped) return { allowed: false, reason: 'kill_switch' };
-  if (!cfg.enabled) return { allowed: false, reason: 'disabled' };
+  // Every refusal names the limit that refused it, the value it stood at and
+  // the cap it was measured against — so the reason can be read off the
+  // status endpoint without reading a log.
+  if (cfg.stopped) return { allowed: false, reason: 'kill_switch', limit: { name: 'kill_switch', value: true } };
+  if (!cfg.enabled) return { allowed: false, reason: 'disabled', limit: { name: 'enabled', value: false } };
   if (consumer !== 'ticker') return { allowed: true };
 
-  if (usage.stepsToday >= cfg.maxStepsPerDay) return { allowed: false, reason: 'daily_steps_cap' };
+  if (usage.stepsToday >= cfg.maxStepsPerDay) {
+    return { allowed: false, reason: 'daily_steps_cap', limit: { name: 'stepsToday', value: usage.stepsToday, max: cfg.maxStepsPerDay } };
+  }
   // Rolling one-hour window: drop ticks older than 60 minutes, then count.
   const cutoff = Date.now() - 60 * 60 * 1000;
   usage.tickTimestamps = usage.tickTimestamps.filter((t) => t > cutoff);
-  if (usage.tickTimestamps.length >= cfg.maxTicksPerHour) return { allowed: false, reason: 'hourly_tick_cap' };
+  if (usage.tickTimestamps.length >= cfg.maxTicksPerHour) {
+    return { allowed: false, reason: 'hourly_tick_cap', limit: { name: 'ticksLastHour', value: usage.tickTimestamps.length, max: cfg.maxTicksPerHour } };
+  }
   return { allowed: true };
 }
 
@@ -265,12 +276,15 @@ function releaseAutonomyStep(usage, consumer = 'ticker') {
  * usage record — a count per reason and the last refusals in order — so the
  * tick log tells them apart.
  */
-function recordAutonomyRefusal(usage, reason, consumer = 'ticker') {
+function recordAutonomyRefusal(usage, reason, consumer = 'ticker', limit = null) {
   const at = Date.now();
   usage.refusals[reason] = (usage.refusals[reason] || 0) + 1;
-  usage.refusalLog.push({ at, reason, consumer });
+  // Which limit refused it, what it stood at, when it happened.
+  const entry = { at, reason, consumer };
+  if (limit && limit.name) entry.limit = { name: limit.name, value: limit.value, max: limit.max };
+  usage.refusalLog.push(entry);
   if (usage.refusalLog.length > 50) usage.refusalLog.splice(0, usage.refusalLog.length - 50);
-  usage.lastRefusal = { at, reason, consumer };
+  usage.lastRefusal = { ...entry };
   return usage.lastRefusal;
 }
 
@@ -343,8 +357,9 @@ async function runAutonomyTick({ fromQueue = false } = {}) {
   // synchronous block, so ticks that race cannot both take the last step.
   const claim = claimAutonomyStep(autonomyUsage, consumer, autonomyBudgetConfig());
   if (!claim.allowed) {
-    recordAutonomyRefusal(autonomyUsage, claim.reason, consumer);
-    console.log(`[autonomy] ${consumer} tick skipped: ${claim.reason}`);
+    recordAutonomyRefusal(autonomyUsage, claim.reason, consumer, claim.limit);
+    saveUsage();
+    console.log(`[autonomy] ${consumer} tick skipped: ${claim.reason}${claim.limit ? ` (${claim.limit.name}=${claim.limit.value}${claim.limit.max === undefined ? '' : '/' + claim.limit.max})` : ''}`);
     return { ok: false, reason: claim.reason };
   }
   // A claim that never becomes a tick is given back, so the office is never
@@ -356,7 +371,8 @@ async function runAutonomyTick({ fromQueue = false } = {}) {
     // queued work can never drain once a daily cap is reached.
     const tb = await checkTokenBudget();
     if (!tb.allowed && !fromQueue) {
-      recordAutonomyRefusal(autonomyUsage, 'daily_token_budget', consumer);
+      recordAutonomyRefusal(autonomyUsage, 'daily_token_budget', consumer, { name: 'dailyTokenBudget', value: tb.spentToday, max: tb.budget });
+      saveUsage();
       console.log(`[autonomy] tick skipped: daily_token_budget (${tb.spentToday}/${tb.budget})`);
       return { ok: false, reason: 'daily_token_budget', spentToday: tb.spentToday, budget: tb.budget };
     }
@@ -366,7 +382,8 @@ async function runAutonomyTick({ fromQueue = false } = {}) {
     if (!fromQueue) {
       const activeRuns = goalRuns.filter(r => r.status === 'started' || r.status === 'running');
       if (activeRuns.length >= AUTONOMY.maxConcurrentRuns) {
-        recordAutonomyRefusal(autonomyUsage, 'max_concurrent', consumer);
+        recordAutonomyRefusal(autonomyUsage, 'max_concurrent', consumer, { name: 'activeRuns', value: activeRuns.length, max: AUTONOMY.maxConcurrentRuns });
+        saveUsage();
         console.log('[autonomy] tick skipped: max_concurrent');
         return { ok: false, reason: 'max_concurrent' };
       }
@@ -380,7 +397,8 @@ async function runAutonomyTick({ fromQueue = false } = {}) {
         kind: 'autopilot_tick',
         reason: 'no model provider available (free + paid both exhausted)',
       });
-      recordAutonomyRefusal(autonomyUsage, 'no_provider', consumer);
+      recordAutonomyRefusal(autonomyUsage, 'no_provider', consumer, { name: 'modelProvider', value: 'none available' });
+      saveUsage();
       console.log(`[autonomy] no provider available — queued as ${queued.id}`);
       await notifyOwnerOfBlindness('No model provider can serve right now (free models and MiniMax are both exhausted). The tick is queued and will run automatically as soon as one frees up.');
       // Check again shortly — a provider may free up sooner than the drain cycle.

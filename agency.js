@@ -1216,9 +1216,11 @@ function updateTask(taskId, patch) {
     sprintId = sprint.id;
   }
   const nextPhase = typeof patch.phase === 'string' && PHASES.includes(patch.phase) ? patch.phase : t.phase;
+  let explicitRole = null;
   if (typeof patch.role === 'string' && patch.role) {
     if (!ROSTER.some((a) => a.matrixRole === patch.role)) return { ok: false, reason: 'invalid_role' };
     if (!roleEligibleForPhase(patch.role, nextPhase)) return { ok: false, reason: 'role_not_eligible' };
+    explicitRole = patch.role;
   }
 
   if (typeof patch.title === 'string' && patch.title.trim()) t.title = patch.title.trim();
@@ -1259,9 +1261,21 @@ function updateTask(taskId, patch) {
     t.sprintId = sprintId;
     logActivity('Orchestrator', `moved "${t.title}" to a different sprint`);
   }
+  const previousRole = t.role;
   if (typeof patch.phase === 'string' && PHASES.includes(patch.phase)) {
     t.phase = patch.phase;
-    t.role = (ROSTER.find((a) => a.phases.includes(patch.phase) && !a.manager && a.subagent) || {}).matrixRole || t.role;
+    if (!explicitRole) {
+      t.role = (ROSTER.find((a) => a.phases.includes(patch.phase) && !a.manager && a.subagent) || {}).matrixRole || t.role;
+    }
+  }
+  if (explicitRole) {
+    t.role = explicitRole;
+    if (explicitRole !== previousRole) {
+      // The previous owner no longer carries the task's role (F-20), so the
+      // task returns to the unassigned pool for an eligible owner.
+      t.ownerId = null;
+      if (t.status !== 'done' && t.status !== 'cancelled') t.status = 'backlog';
+    }
   }
   save();
   return { ok: true, task: t };

@@ -114,11 +114,19 @@ function freshUsage() {
     const daily = office.autonomyBudget(usage, 'ticker', CFG);
     check('the daily cap is refused with daily_steps_cap',
       daily.allowed === false && daily.reason === 'daily_steps_cap', JSON.stringify(daily));
+    check('the daily refusal names the limit, its value and the cap',
+      !!daily.limit && daily.limit.name === 'stepsToday'
+      && daily.limit.value === CFG.maxStepsPerDay && daily.limit.max === CFG.maxStepsPerDay,
+      JSON.stringify(daily.limit));
     usage.stepsToday = 0;
     usage.tickTimestamps = [Date.now(), Date.now(), Date.now(), Date.now()];
     const hourly = office.autonomyBudget(usage, 'ticker', CFG);
     check('the hourly cap is refused with hourly_tick_cap',
       hourly.allowed === false && hourly.reason === 'hourly_tick_cap', JSON.stringify(hourly));
+    check('the hourly refusal names the limit, its value and the cap',
+      !!hourly.limit && hourly.limit.name === 'ticksLastHour'
+      && hourly.limit.value === CFG.maxTicksPerHour && hourly.limit.max === CFG.maxTicksPerHour,
+      JSON.stringify(hourly.limit));
   }
 
   console.log('--- the refusal record tells them apart ---');
@@ -137,6 +145,15 @@ function freshUsage() {
     check('the log does not grow without bound', usage.refusalLog.length <= 50, `len=${usage.refusalLog.length}`);
     check('the count keeps every refusal', usage.refusals.daily_steps_cap === 101, `count=${usage.refusals.daily_steps_cap || usage.refusals.daily_steps_cap}`);
     check('the queue consumer is logged as the queue', usage.refusalLog[usage.refusalLog.length - 1].consumer === 'queue');
+
+    // A refusal says which limit refused it, what it stood at and when.
+    office.recordAutonomyRefusal(usage, 'daily_steps_cap', 'ticker', { name: 'stepsToday', value: CFG.maxStepsPerDay, max: CFG.maxStepsPerDay });
+    check('the refusal carries the limit, its value and the cap',
+      !!usage.lastRefusal.limit && usage.lastRefusal.limit.name === 'stepsToday'
+      && usage.lastRefusal.limit.value === CFG.maxStepsPerDay && usage.lastRefusal.limit.max === CFG.maxStepsPerDay,
+      JSON.stringify(usage.lastRefusal));
+    check('the log keeps the limit with the reason', usage.refusalLog[usage.refusalLog.length - 1].limit.name === 'stepsToday');
+    check('the refusal says when it happened', Number.isFinite(usage.lastRefusal.at));
   }
 
   console.log('--- a record from before the split is not charged to the ticker ---');
