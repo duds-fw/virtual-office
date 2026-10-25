@@ -346,6 +346,41 @@ console.log('--- P6: metrics are project-scoped ---');
     ma.project.id !== mb.project.id);
 }
 
+// ------------------------------------------------------------------ migration
+
+console.log('--- migration from the pre-pipeline model ---');
+{
+  const legacy = { id: 'proj_x', name: 'Legacy', status: 'active', goal: 'g' };
+  const r = pipeline.migrateProject(legacy);
+  check('the legacy `active` status becomes `delivering`',
+    legacy.status === 'delivering', legacy.status);
+  check('the migration reports what it changed', r.changed === true && r.notes.length === 1);
+  check('a migrated project carries the new fields',
+    Array.isArray(legacy.acceptanceCriteria) && legacy.delivery === null &&
+    legacy.acceptedAt === null && legacy.ratified === false);
+
+  const unknown = { id: 'proj_y', status: 'shipped' };
+  pipeline.migrateProject(unknown);
+  check('an unknown status becomes registered', unknown.status === 'registered', unknown.status);
+
+  const clean = { id: 'proj_z', status: 'planning', acceptanceCriteria: [] };
+  const rc = pipeline.migrateProject(clean);
+  check('a project already on the model is left alone', rc.changed === false);
+
+  const doneTask = { id: 'task_a', status: 'done', completedAt: 2 };
+  const rt = pipeline.migrateTask(doneTask);
+  check('a task closed before P3 gains a deliverable', !!doneTask.deliverable);
+  check('the backfilled deliverable is marked as migrated',
+    doneTask.deliverable.migrated === true &&
+    /before the deliverable field existed/.test(doneTask.deliverable.summary));
+  check('the backfilled task keeps its done status', doneTask.status === 'done');
+  check('the migration reports what it changed', rt.changed === true);
+
+  const openTask = { id: 'task_b', status: 'in_progress' };
+  pipeline.migrateTask(openTask);
+  check('an open task is not given a deliverable', !openTask.deliverable);
+}
+
 // ------------------------------------------------------------------- report
 
 console.log(`\n${pass} passed, ${fail} failed`);

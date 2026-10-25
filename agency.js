@@ -158,6 +158,7 @@ function load() {
       const parsed = JSON.parse(fs.readFileSync(FILE, 'utf8'));
       if (parsed && Array.isArray(parsed.tasks)) {
         db = parsed;
+        migrateLegacyState(db);
         return db;
       }
     }
@@ -168,6 +169,32 @@ function load() {
   seedSprintOne();
   save();
   return db;
+}
+
+/**
+ * Bring a state file written before the pipeline model onto the pipeline model.
+ *
+ * Runs once, at load, on records the old office wrote: projects carrying the
+ * old hardcoded `active` status and tasks closed before the deliverable field
+ * existed. Everything downstream then reads a valid model without each caller
+ * having to know about the old shape.
+ */
+function migrateLegacyState(d) {
+  const notes = [];
+  for (const p of d.projects || []) {
+    const r = pipeline.migrateProject(p);
+    if (r.changed) notes.push(`project ${p.id}: ${r.notes.join(', ')}`);
+  }
+  for (const t of d.tasks || []) {
+    const r = pipeline.migrateTask(t);
+    if (r.changed) notes.push(`task ${t.id}: ${r.notes.join(', ')}`);
+  }
+  if (notes.length) {
+    console.log(`[agency] migrated ${notes.length} legacy record(s) onto the pipeline model`);
+    for (const n of notes.slice(0, 20)) console.log(`  ${n}`);
+    if (notes.length > 20) console.log(`  ... and ${notes.length - 20} more`);
+    save();
+  }
 }
 
 /** Seed the first sprint with the real backlog of building the agency itself. */

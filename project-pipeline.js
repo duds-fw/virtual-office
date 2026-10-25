@@ -335,6 +335,72 @@ function projectProgress(project, tasksById) {
   };
 }
 
+/**
+ * Migrate a legacy record onto the pipeline vocabulary.
+ *
+ * The office ran projects with a single hardcoded `active` status before the
+ * stage machine existed, and ran tasks with no deliverable field before P3
+ * existed. Loading such a record must not leave the office holding a status
+ * the machine does not recognise, so the migration happens once, at the
+ * boundary, and every consumer then sees a valid model.
+ *
+ * `active` maps to `delivering`: the legacy status meant "a live project with
+ * work in flight", which is exactly what `delivering` means in the pipeline.
+ * `active` is a derived alias from here on, never a stored value.
+ *
+ * Returns { changed, notes } so the caller can log what it repaired.
+ */
+function migrateProject(project) {
+  const notes = [];
+  if (!project || typeof project !== 'object') return { changed: false, notes };
+
+  if (project.status === 'active') {
+    project.status = 'delivering';
+    notes.push(`status active -> delivering`);
+  }
+  if (!isProjectStatus(project.status)) {
+    project.status = 'registered';
+    notes.push(`unknown status ${project.status} -> registered`);
+  }
+  if (!Array.isArray(project.acceptanceCriteria)) {
+    project.acceptanceCriteria = [];
+  }
+  if (project.delivery === undefined) project.delivery = null;
+  if (project.dueAt === undefined) project.dueAt = null;
+  if (project.triagedAt === undefined) project.triagedAt = null;
+  if (project.acceptedAt === undefined) project.acceptedAt = null;
+  if (project.closedAt === undefined) project.closedAt = null;
+  if (project.acceptedBy === undefined) project.acceptedBy = null;
+  if (project.ratified === undefined) project.ratified = false;
+
+  return { changed: notes.length > 0, notes };
+}
+
+/**
+ * Migrate a legacy task onto the pipeline model.
+ *
+ * A task closed before P3 existed has no deliverable. Backfilling one would
+ * invent a claim about work that was never described, so the migration records
+ * the fact of completion instead: the task keeps its `done` status and gains a
+ * deliverable that says so honestly.
+ */
+function migrateTask(task) {
+  const notes = [];
+  if (!task || typeof task !== 'object') return { changed: false, notes };
+  if (!task.deliverable && task.status === 'done') {
+    task.deliverable = {
+      kind: 'record',
+      summary: 'Closed before the deliverable field existed; no deliverable was recorded at the time.',
+      ref: null,
+      url: null,
+      at: task.completedAt || task.createdAt || Date.now(),
+      migrated: true,
+    };
+    notes.push('backfilled a deliverable for a task closed before P3');
+  }
+  return { changed: notes.length > 0, notes };
+}
+
 module.exports = {
   PROJECT_STATUSES,
   PROJECT_STAGE_ORDER,
@@ -353,4 +419,6 @@ module.exports = {
   checkNoActiveSprintBeforePlanning,
   canTransition,
   projectProgress,
+  migrateProject,
+  migrateTask,
 };
