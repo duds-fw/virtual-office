@@ -15,6 +15,7 @@ const router = require('./model-router');
 const workQueue = require('./work-queue');
 const briefing = require('./briefing');
 const tokenSavings = require('./token-savings');
+const capacity = require('./capacity');
 
 const STATE_DIR = path.join(__dirname, 'state');
 const AUTONOMY_KILL_FILE = path.join(__dirname, '.autonomy_stop');
@@ -1424,6 +1425,90 @@ const server = http.createServer(async (req, res) => {
     try { if (fs.existsSync(AUTONOMY_KILL_FILE)) fs.unlinkSync(AUTONOMY_KILL_FILE); } catch(e){}
     res.writeHead(200, { 'Content-Type': 'application/json' });
     return res.end(JSON.stringify({ ok:true, stopped:false }));
+  }
+
+  if (pathname === '/api/agency/capacity' && req.method === 'GET') {
+    // What the office has, what is left of it, and when it comes back:
+    // the host's resources, the provider's 5-hour and weekly quota windows,
+    // the token plan with its projection, and the model hierarchy with the
+    // tier that is serving. This is the read model the dashboard renders.
+    const [quota, tokens] = await Promise.all([
+      capacity.readQuota(),
+      checkTokenBudget(),
+    ]);
+    const rs = router.status();
+    const hierarchy = capacity.modelHierarchy(rs.candidates, {
+      freeKeys: rs.policy.free,
+      paidKeys: rs.policy.paid,
+    });
+
+    // Hours left in the local day: the token budget resets at local midnight.
+    const nowDate = new Date();
+    const midnight = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate() + 1);
+    const hoursLeftInDay = (midnight.getTime() - nowDate.getTime()) / 3600000;
+
+    const plan = capacity.tokenPlan({
+      dailyBudget: tokens.budget,
+      spentToday: tokens.spentToday,
+      roleBudget: tokens.roleBudget,
+      roleSpend: tokens.roleSpend,
+      hoursLeftInDay,
+    });
+
+    const resources = capacity.sampleResources(STATE_DIR);
+
+    // The advice the dashboard shows at the top. Plain sentences, because the
+    // owner reads them and acts on them.
+    const advice = [];
+    if (hierarchy.servingTier === null) {
+      advice.push('No model can serve right now. The office queues its work and resumes when a provider frees up.');
+    } else if (hierarchy.servingTier === 'paid') {
+      advice.push('The free tier is unavailable, so the office is running on the paid fallback.');
+    } else {
+      advice.push('The free tier is serving. The paid fallback is held in reserve.');
+    }
+    const paid = hierarchy.models.find((m) => m.tier === 'paid');
+    if (paid && paid.coolingDown) {
+      advice.push(`The paid fallback is cooling down for another ${Math.ceil(paid.coolingForMs / 60000)} minutes.`);
+    }
+    if (plan.willExhaustToday) {
+      advice.push(`At the current rate the daily token budget runs out in about ${Math.max(0, Math.round(plan.projectedExhaustionHours))} hours.`);
+    }
+    if (resources.pressure === 'critical' || resources.pressure === 'elevated') {
+      advice.push(`The host is under pressure (load ${resources.loadPerCpu} per CPU, memory ${resources.memory.usedPercent}% used).`);
+    }
+    for (const w of quota.windows || []) {
+      if (w.interval && w.interval.remainingPercent != null && w.interval.remainingPercent <= 20) {
+        advice.push(`The 5-hour model window has ${w.interval.remainingPercent}% left.`);
+      }
+      if (w.weekly && w.weekly.remainingPercent != null && w.weekly.remainingPercent <= 20) {
+        advice.push(`The weekly model window has ${w.weekly.remainingPercent}% left.`);
+      }
+    }
+
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-cache' });
+    return res.end(JSON.stringify({
+      ok: true,
+      at: Date.now(),
+      resources,
+      quota,
+      plan,
+      hierarchy,
+      autonomy: {
+        enabled: AUTONOMY.enabled,
+        stopped: isAutonomyStopped(),
+        intervalMs: AUTONOMY.intervalMs,
+        maxStepsPerDay: AUTONOMY.maxStepsPerDay,
+        maxTicksPerHour: AUTONOMY.maxTicksPerHour,
+        stepsToday: autonomyUsage.stepsToday,
+        queuedStepsToday: autonomyUsage.queuedStepsToday || 0,
+        ticksLastHour: (autonomyUsage.tickTimestamps || []).filter((t) => t > Date.now() - 3600000).length,
+        lastTickAt: autonomyUsage.lastTickAt || 0,
+        lastRefusal: autonomyUsage.lastRefusal || null,
+        activeRuns: goalRuns.filter((r) => r.status === 'started' || r.status === 'running').length,
+      },
+      advice,
+    }));
   }
 
   if (pathname === '/api/agency/tokens' && req.method === 'GET') {

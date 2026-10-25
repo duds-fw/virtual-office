@@ -36,6 +36,9 @@ const MODEL_POLICY = {
 /** How long a failed candidate stays marked exhausted. */
 const COOLDOWN_MS = 10 * 60 * 1000;
 
+/** How long a candidate's health is trusted before it is probed again. */
+const HEALTH_TTL_MS = 5 * 60 * 1000;
+
 const state = {
   candidates: [],
   active: null,
@@ -86,11 +89,22 @@ function isQuotaError(message) {
   return /usage limit|quota|credits?|subscribe|insufficient|free usage/i.test(String(message || ''));
 }
 
-/** Probe one candidate end to end: create a session, ask, read the answer. */
-async function probeCandidate(c) {
+/** Probe one candidate end to end: create a session, ask, read the answer.
+ *
+ * The reply window used to be 20 seconds (8 polls of 2.5s). That is shorter
+ * than a busy model takes to answer, so working models were declared dead
+ * with "no response in time" and the office fell back to a paid provider it
+ * did not need. The window is now a minute, and the whole ladder is probed
+ * inside a total budget so one slow candidate cannot hold the tick.
+ */
+const PROBE_REPLY_WINDOW_MS = 60000;
+const PROBE_POLL_MS = 2500;
+const PROBE_TOTAL_BUDGET_MS = 120000;
+
+async function probeCandidate(c, { deadline = 0 } = {}) {
   const created = await runApi(['api', 'session.create', '--data', JSON.stringify({
     title: 'router-probe', model: { providerID: c.providerID, id: c.modelID },
-  })]);
+  })], 30000);
   if (!created.ok || !created.json || !created.json.data) {
     c.healthy = false;
     c.lastChecked = now();
@@ -100,11 +114,19 @@ async function probeCandidate(c) {
   }
   const sessionID = created.json.data.id;
   await runApi(['api', 'session.prompt', '--param', `sessionID=${sessionID}`, '--data',
-    JSON.stringify({ text: 'reply with exactly: ROUTER_OK' })]);
+    JSON.stringify({ text: 'reply with exactly: ROUTER_OK' })], 60000);
 
-  for (let i = 0; i < 8; i++) {
-    await new Promise((r) => setTimeout(r, 2500));
-    const msgs = await runApi(['api', 'session.message.list', '--param', `sessionID=${sessionID}`, '--param', 'limit=6']);
+  const polls = Math.max(1, Math.floor(PROBE_REPLY_WINDOW_MS / PROBE_POLL_MS));
+  for (let i = 0; i < polls; i++) {
+    if (deadline && Date.now() > deadline) {
+      c.healthy = false;
+      c.lastChecked = now();
+      c.lastError = 'probe budget exhausted';
+      c.failures++;
+      return c;
+    }
+    await new Promise((r) => setTimeout(r, PROBE_POLL_MS));
+    const msgs = await runApi(['api', 'session.message.list', '--param', `sessionID=${sessionID}`, '--param', 'limit=6'], 20000);
     const list = (msgs.json && (msgs.json.data || msgs.json.messages)) || [];
     const assistant = list.filter((m) => m.type === 'assistant').pop();
     if (!assistant) continue;
@@ -138,7 +160,7 @@ async function probeCandidate(c) {
  * Returns { model, key, providerID, modelID, degraded } or null when every
  * candidate is exhausted.
  */
-async function selectModel({ probe = true } = {}) {
+async function selectModel({ probe = true, probeFn = null } = {}) {
   ensureState();
   const nowTs = now();
 
@@ -152,18 +174,46 @@ async function selectModel({ probe = true } = {}) {
       return a.failures - b.failures;
     });
 
+  // One budget for the whole ladder. A tick must reach the paid fallback in
+  // time to do anything, so probing cannot run away.
+  const deadline = nowTs + PROBE_TOTAL_BUDGET_MS;
+
   for (const c of ordered) {
     if (c.healthy === false && nowTs - c.lastChecked < COOLDOWN_MS) continue;
     if (!probe && c.healthy === true) {
       state.active = c.key;
       return { ...c, degraded: !MODEL_POLICY.free.includes(c.key) };
     }
-    const r = await probeCandidate(c);
+    // Health is trusted for a short window. Re-probing the whole ladder on
+    // every tick is what turned one unlucky probe into a blind office.
+    if (c.healthy === true && nowTs - c.lastChecked < HEALTH_TTL_MS) {
+      state.active = c.key;
+      return { ...c, degraded: !MODEL_POLICY.free.includes(c.key), trusted: true };
+    }
+    const r = await (probeFn || probeCandidate)(c, { deadline });
     if (r.healthy) {
       state.active = r.key;
       return { ...r, degraded: !MODEL_POLICY.free.includes(r.key) };
     }
+    if (Date.now() > deadline) break;
   }
+
+  // Last resort: the ladder could not be verified inside the budget. Rather
+  // than blinding the office, try a candidate that has served before. If the
+  // provider really is down the tick fails and is queued, so nothing is lost.
+  const recent = state.candidates
+    .filter((c) => c.served > 0 && nowTs - c.lastChecked < 60 * 60 * 1000)
+    .sort((a, b) => {
+      const freeA = MODEL_POLICY.free.includes(a.key) ? 0 : 1;
+      const freeB = MODEL_POLICY.free.includes(b.key) ? 0 : 1;
+      if (freeA !== freeB) return freeA - freeB;
+      return a.failures - b.failures;
+    })[0];
+  if (recent) {
+    state.active = recent.key;
+    return { ...recent, degraded: !MODEL_POLICY.free.includes(recent.key), unverified: true };
+  }
+
   state.active = null;
   return null;
 }
@@ -243,9 +293,28 @@ function simulateExhausted(key, ms = COOLDOWN_MS) {
   return true;
 }
 
-/** Clear a simulated exhaustion so the recovery path can be verified. */
-function clearExhaustion(key) {
+/**
+ * Record a candidate's state without talking to a provider.
+ * Used to verify the selection rules — the trust window, the cooldown, the
+ * fallback — without waiting on a live model.
+ */
+function simulateOutcome(key, patch = {}) {
   const c = candidate(key);
+  if (!c) return false;
+  Object.assign(c, patch);
+  return true;
+}
+
+/** Forget what the router has learned. Used between test cases. */
+function resetState() {
+  state.candidates = [];
+  state.active = null;
+  state.lastError = null;
+  ensureState();
+}
+
+/** Clear a simulated exhaustion so the recovery path can be verified. */
+function clearExhaustion(key) {  const c = candidate(key);
   if (!c) return false;
   c.exhaustedUntil = 0;
   c.healthy = null;       // unknown again — the next probe decides
@@ -256,6 +325,8 @@ function clearExhaustion(key) {
 module.exports = {
   MODEL_POLICY,
   COOLDOWN_MS,
+  HEALTH_TTL_MS,
+  PROBE_TOTAL_BUDGET_MS,
   selectModel,
   currentModel,
   status,
@@ -265,4 +336,6 @@ module.exports = {
   isQuotaError,
   simulateExhausted,
   clearExhaustion,
+  simulateOutcome,
+  resetState,
 };
