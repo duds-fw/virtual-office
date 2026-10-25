@@ -1544,6 +1544,13 @@ const server = http.createServer(async (req, res) => {
     }));
   }
 
+  if (pathname === '/api/agency/vocabulary' && req.method === 'GET') {
+    // The office's own vocabulary: the console may map state to pixels, but
+    // it may not own a list (D9).
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    return res.end(JSON.stringify(agency.vocabulary()));
+  }
+
   if (pathname === '/api/agency/state' && req.method === 'GET') {
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-cache' });
     return res.end(JSON.stringify(agency.state()));

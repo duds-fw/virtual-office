@@ -66,8 +66,6 @@
   .agent .status .s-dot { width:6px; height:6px; border-radius:50%; }
   .st-working .s-dot { background:var(--ok); box-shadow:0 0 5px var(--ok); }
   .st-idle .s-dot { background:#475569; }
-  .st-blocked .s-dot { background:var(--danger); }
-  .st-review .s-dot { background:var(--warn); }
 
   .feed { font-family:'JetBrains Mono',ui-monospace,monospace; font-size:10px; line-height:1.5; }
   .feed .line { padding:4px 0; border-bottom:1px dashed rgba(148,163,184,0.12);
@@ -94,11 +92,8 @@
   .task .t-blocked { font-size:9px; color:var(--danger); margin-top:3px; }
   .pill { font-size:8px; text-transform:uppercase; letter-spacing:.06em; padding:1px 5px; border-radius:99px;
     border:1px solid var(--border); color:var(--muted); white-space:nowrap; }
-  .pill-ready { color:#93c5fd; border-color:rgba(147,197,253,.35); }
-  .pill-in_progress { color:var(--warn); border-color:rgba(245,158,11,.35); }
-  .pill-review { color:#c4b5fd; border-color:rgba(196,181,253,.35); }
-  .pill-blocked { color:var(--danger); border-color:rgba(239,68,68,.45); }
-  .pill-done { color:var(--ok); border-color:rgba(34,197,94,.35); }
+  .pill-info { color:#93c5fd; border-color:rgba(147,197,253,.35); }
+  .pill-muted { color:var(--muted); border-color:rgba(148,163,184,.30); }
   .wl-top { font-size:10px; color:var(--muted); margin-bottom:4px; }
   .wl-top b { color:var(--text); }
   .wl-row { padding:4px 0; border-bottom:1px dashed rgba(148,163,184,.12); }
@@ -311,6 +306,36 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
+/**
+ * The engine owns the vocabulary (D9). The console may map semantic state to
+ * pixels; it may not own a list of statuses, phases, gates or roles.
+ */
+const VOCAB = await loadVocabulary();
+
+/** Fetch the office's vocabulary. Without it the console boots degraded. */
+async function loadVocabulary() {
+  const empty = { taskStatuses: [], taskStatusTones: {}, projectStatuses: [], projectStages: [], phases: [], phaseRoles: [], gates: [], phaseFlags: {}, roles: [] };
+  try {
+    const res = await fetch('/api/agency/vocabulary', { cache: 'no-store' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    return await res.json();
+  } catch (e) {
+    console.error('[vocabulary] the engine did not serve it:', e.message);
+    return empty;
+  }
+}
+
+/** The engine's phase list, in the engine's order. */
+const PHASES = VOCAB.phases.slice();
+/** Which roles work a phase. */
+const PHASE_ROLE_MATRIX = {};
+for (const row of VOCAB.phaseRoles || []) PHASE_ROLE_MATRIX[row.phase] = (row.roles || []).slice();
+/** How a task status reads, by tone. The console maps a tone to pixels. */
+const STATUS_TONE = VOCAB.taskStatusTones || {};
+const toneFor = (status) => STATUS_TONE[status] || 'muted';
+/** The phase where work is released to production. */
+const DEPLOY_PHASE = (VOCAB.phaseFlags && VOCAB.phaseFlags.deploy) || null;
+
 const feedLines = [];
 /** Which of the two views is on screen: 'dashboard' (landing) or 'office'. */
 let currentView = 'dashboard';
@@ -392,17 +417,26 @@ function station(s) {
   spr.scale.set(3.6,0.78,1); spr.position.set(0,3.0,0); g.add(spr);
   g.position.set(s.x,0,s.z); scene.add(g);
 }
-const ROOMS = {
-  planning:  { label:'Planning',   x:-8, z:-6 },
-  analysis:  { label:'Analysis',   x: 0, z:-6 },
-  design:    { label:'Design',     x: 8, z:-6 },
-  dev:       { label:'Dev Bay',    x:-8, z: 2 },
-  qa:        { label:'QA Lab',     x: 0, z: 2 },
-  deploy:    { label:'Deploy',     x: 8, z: 2 },
-  ops:       { label:'Ops',       x: 8, z: 8 },
-  support:   { label:'Support',    x: 0, z: 8 },
-  breakroom: { label:'Break',      x:-8, z: 8 },
-};
+/**
+ * Room slots are pixels: where a room sits, and what it is called when it is
+ * not a phase room. Which phase works in which room is the engine's.
+ */
+const ROOM_SLOTS = [
+  { key:'planning', x:-8, z:-6 }, { key:'analysis', x: 0, z:-6 }, { key:'design',   x: 8, z:-6 },
+  { key:'dev',      x:-8, z: 2 }, { key:'qa',      x: 0, z: 2 }, { key:'deploy',   x: 8, z: 2 },
+  { key:'ops',      x: 8, z: 8 },
+];
+const ROOMS = {};
+for (const slot of ROOM_SLOTS) ROOMS[slot.key] = { label:'', x:slot.x, z:slot.z };
+ROOMS.support = { label:'Support', x: 0, z: 8 };
+ROOMS.breakroom = { label:'Break',  x:-8, z: 8 };
+// One phase-to-room map, built from the engine's phase order.
+const PHASE_ROOM = {};
+VOCAB.phases.forEach((phase, i) => {
+  const slot = ROOM_SLOTS[i] || ROOM_SLOTS[ROOM_SLOTS.length - 1];
+  PHASE_ROOM[phase] = slot.key;
+  if (ROOMS[slot.key]) ROOMS[slot.key].label = phase;
+});
 for (const s of Object.values(ROOMS)) station(s);
 box(5,0.12,2.5,0,0.72,-2,0x64748b,{shadow:true});
 
@@ -430,28 +464,30 @@ function avatar(shirtColor) {
   return g;
 }
 
-const AGENTS = [
-  { id:'orch', name:'Orchestrator', role:'Lead Orchestrator', matrixRole:'orchestrator_lead', manager:true, phases:['Planning','Analysis','Design','Development','Review','Deployment','Operations'], color:0x38bdf8, init:'OR' },
-  { id:'po', name:'Product Owner', role:'Product Mgmt', matrixRole:'product_owner_product_manager', phases:['Planning','Analysis'], color:0x8b5cf6, init:'PO' },
-  { id:'be', name:'Biz Enable', role:'Business Enablement', matrixRole:'business_enablement', phases:['Planning','Analysis','Operations'], color:0x0ea5e9, init:'BE' },
-  { id:'ux', name:'UI/UX', role:'UI/UX Designer', matrixRole:'ui_ux_designer', phases:['Design'], color:0xf472b6, init:'UX' },
-  { id:'se', name:'Software Eng', role:'Software Engineer', matrixRole:'software_engineer', phases:['Development'], color:0x22c55e, init:'SE' },
-  { id:'de', name:'Data Eng', role:'Database Engineer', matrixRole:'database_engineer', phases:['Design','Development'], color:0x14b8a6, init:'DE' },
-  { id:'aie', name:'AI Eng', role:'AI Engineer', matrixRole:'ai_engineer', phases:['Design','Development'], color:0xc084fc, init:'AI' },
-  { id:'qa', name:'QA', role:'Quality Assurance', matrixRole:'quality_assurance', phases:['Review'], color:0xfbbf24, init:'QA' },
-  { id:'dso', name:'DevOps', role:'DevOps/SRE', matrixRole:'devops_sre', phases:['Deployment','Operations'], color:0xfb923c, init:'DO' },
-  { id:'ce', name:'Cloud Eng', role:'Cloud Engineer', matrixRole:'cloud_engineer', phases:['Deployment','Operations'], color:0x60a5fa, init:'CL' },
-  { id:'iti', name:'Infra', role:'IT Infrastructure', matrixRole:'it_infrastructure', phases:['Operations','Deployment'], color:0x64748b, init:'IT' },
-  { id:'ns', name:'NetSec', role:'Network & Security', matrixRole:'network_and_security', phases:['Review','Operations'], color:0xef4444, init:'NS' },
-  { id:'soc', name:'SOC', role:'Security Operations', matrixRole:'security_operations_soc', phases:['Review','Operations'], color:0xdc2626, init:'SC' },
-  { id:'dba', name:'DBA', role:'Database Admin', matrixRole:'database_administrator', phases:['Operations','Deployment'], color:0x0f766e, init:'DB' },
-  { id:'da', name:'Data Analyst', role:'Data Analyst', matrixRole:'data_analyst', phases:['Analysis','Planning'], color:0x2dd4bf, init:'DA' },
-  { id:'sd', name:'Service Desk', role:'IT Support', matrixRole:'it_support_service_desk', phases:['Operations'], color:0x94a3b8, init:'SD' },
-];
+/**
+ * How a role looks. The console owns the pixels; the roster comes from the
+ * engine (D9) — a role the engine adds appears without a change here.
+ */
+const ROLE_PALETTE = [0x38bdf8,0x8b5cf6,0x0ea5e9,0xf472b6,0x22c55e,0x14b8a6,0xc084fc,0xfbbf24,0xfb923c,0x60a5fa,0x64748b,0xef4444,0xdc2626,0x0f766e,0x2dd4bf,0x94a3b8,0xbe123c,0x7c3aed];
+function roleColor(matrixRole) {
+  let h = 0;
+  const s = String(matrixRole || '');
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return ROLE_PALETTE[h % ROLE_PALETTE.length];
+}
+function roleInitials(name) {
+  const words = String(name || '').trim().split(/\s+/).filter(Boolean);
+  if (words.length >= 2) return (words[0][0] + words[1][0]).toUpperCase();
+  return (words[0] || '?').slice(0, 2).toUpperCase();
+}
+const AGENTS = VOCAB.roles.map((r) => ({
+  id: r.id, name: r.name, role: r.title, matrixRole: r.matrixRole,
+  manager: !!r.manager, phases: r.phases || [],
+  color: roleColor(r.matrixRole), init: roleInitials(r.name),
+}));
 const agents = AGENTS.map((r,i) => {
-  const homePhase = r.phases?.[0] || 'Planning';
-  const roomByPhase = { Planning:'planning', Analysis:'analysis', Design:'design', Development:'dev', Review:'qa', Deployment:'deploy', Operations:'ops' };
-  const roomKey = roomByPhase[homePhase] || 'breakroom';
+  const homePhase = r.phases?.[0] || PHASES[0];
+  const roomKey = PHASE_ROOM[homePhase] || 'breakroom';
   const st = ROOMS[roomKey] || ROOMS.breakroom;
   const av = avatar(r.color);
   av.position.set(st.x + (Math.random()-0.5)*2, 0, st.z + (Math.random()-0.5)*1.5);
@@ -468,27 +504,16 @@ const agents = AGENTS.map((r,i) => {
   const spr=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,transparent:true}));
   spr.scale.set(2.0,0.44,1); spr.position.set(0,2.7,0); av.add(spr);
   return { ...r, avatar:av, x:av.position.x, z:av.position.z, tx:av.position.x, tz:av.position.z,
-    status:'idle', task:null, phase:'Planning', speed:0.05+Math.random()*0.02 };
+    status:'idle', task:null, phase:PHASES[0], speed:0.05+Math.random()*0.02 };
 });
 
-const PHASES = ['Planning','Analysis','Design','Development','Review','Deployment','Operations'];
-const PHASE_ROOM = { Planning:'planning', Analysis:'analysis', Design:'design', Development:'dev', Review:'qa', Deployment:'deploy', Operations:'ops' };
 const TASK_TITLES = ['Feature impl','Bug fix','Refactor','Docs update','CI pipeline','Security scan','Test suite','Research','Deploy release','Ops check','Auth flow','API endpoint'];
-const PHASE_ROLE_MATRIX = {
-  Planning: ['product_owner_product_manager'],
-  Analysis: ['business_enablement','data_analyst'],
-  Design: ['ui_ux_designer','database_engineer','ai_engineer'],
-  Development: ['software_engineer','database_engineer','ai_engineer'],
-  Review: ['quality_assurance','network_and_security','security_operations_soc'],
-  Deployment: ['devops_sre','cloud_engineer','database_administrator'],
-  Operations: ['it_infrastructure','it_support_service_desk','devops_sre'],
-};
 
 const tasks = [];
 const injectedLiveIds = new Set();
 let nextId = 1;
 function defaultRolesForPhase(phase) {
-  return PHASE_ROLE_MATRIX[phase] || ['software_engineer'];
+  return PHASE_ROLE_MATRIX[phase] || PHASE_ROLE_MATRIX[PHASES[0]] || [];
 }
 
 function createGoalPlan(goal, description='') {
@@ -497,14 +522,14 @@ function createGoalPlan(goal, description='') {
   tasks.push({
     id: nextId++,
     title: `Build: ${goalName}`,
-    phase: 'Planning',
+    phase: PHASES[0],
     progress: 0,
     owner: null,
     source: 'goal',
     goal: goalName,
     description: goalDesc,
-    requiredRoles: defaultRolesForPhase('Planning'),
-    pendingRoles: defaultRolesForPhase('Planning').slice(),
+    requiredRoles: defaultRolesForPhase(PHASES[0]),
+    pendingRoles: defaultRolesForPhase(PHASES[0]).slice(),
     currentRole: null,
     strictDelegation: true
   });
@@ -514,8 +539,8 @@ function createGoalPlan(goal, description='') {
 
 function spawnTask() {
   const title = TASK_TITLES[Math.floor(Math.random()*TASK_TITLES.length)];
-  const roles = defaultRolesForPhase('Planning');
-  tasks.push({ id: nextId++, title, phase:'Planning', progress:0, owner:null, source:'simulation', requiredRoles: roles, pendingRoles: roles.slice(), currentRole:null, strictDelegation:true });
+  const roles = defaultRolesForPhase(PHASES[0]);
+  tasks.push({ id: nextId++, title, phase:PHASES[0], progress:0, owner:null, source:'simulation', requiredRoles: roles, pendingRoles: roles.slice(), currentRole:null, strictDelegation:true });
   logFeed('system', 'New task: ' + title);
 }
 createGoalPlan('Launch product v1', 'Initial orchestration run for virtual office');
@@ -532,7 +557,7 @@ function upsertLiveTask(item) {
   if (!item || !item.id || !item.title) return;
   const existing = tasks.find(t => t.externalId === item.id);
   if (existing) {
-    if (existing.phase === 'Planning' && item.phase && item.phase !== existing.phase) existing.phase = item.phase;
+    if (existing.phase === PHASES[0] && item.phase && item.phase !== existing.phase) existing.phase = item.phase;
     return;
   }
   const title = item.title.slice(0, 80);
@@ -540,12 +565,12 @@ function upsertLiveTask(item) {
     id: nextId++,
     externalId: item.id,
     title,
-    phase: item.phase || 'Planning',
+    phase: item.phase || PHASES[0],
     progress: 0,
     owner: null,
     source: 'opencode',
-    requiredRoles: defaultRolesForPhase(item.phase || 'Planning'),
-    pendingRoles: defaultRolesForPhase(item.phase || 'Planning').slice(),
+    requiredRoles: defaultRolesForPhase(item.phase || PHASES[0]),
+    pendingRoles: defaultRolesForPhase(item.phase || PHASES[0]).slice(),
     currentRole: null,
     strictDelegation: true
   });
@@ -617,7 +642,7 @@ function logFeed(who, text) {
 
 function assignWork() {
   const open = tasks
-    .filter(t=>!t.owner && t.phase!=='Done' && Array.isArray(t.pendingRoles) && t.pendingRoles.length>0)
+    .filter(t=>!t.owner && !t.done && Array.isArray(t.pendingRoles) && t.pendingRoles.length>0)
     .sort((a,b)=>a.id-b.id);
   if (!open.length) return;
   const t = open[0];
@@ -649,7 +674,7 @@ function dispatchTask(t, verb='dispatch') {
 
 setInterval(() => {
   for (const t of tasks) {
-    if (t.phase==='Done') continue;
+    if (t.done) continue;
     if (t.owner) {
       t.progress += Math.random()*9 + 4;
       if (t.progress >= 100) {
@@ -685,9 +710,9 @@ setInterval(() => {
           t.progress=0;
           t.owner = null;
           dispatchTask(t, 'handoff');
-          if (t.phase==='Deployment') deployCount++;
+          if (t.phase===DEPLOY_PHASE) deployCount++;
         } else {
-          t.phase='Done'; t.progress=100;
+          t.done=true; t.progress=100;
           logFeed(worker?worker.name:'system', `completed "${t.title}"`);
           completedCount++;
         }
@@ -699,14 +724,14 @@ setInterval(() => {
 }, 1500);
 
 setInterval(assignWork, 2000);
-setInterval(() => { if (!liveConnected && tasks.filter(t=>t.phase!=='Done').length < 4) spawnTask(); }, 12000);
+setInterval(() => { if (!liveConnected && tasks.filter(t=>!t.done).length < 4) spawnTask(); }, 12000);
 setInterval(syncOpenCodeLive, 7000);
 
 function updateMetrics() {
   throughput = Math.round((completedCount*3600)/((Date.now()-start)/1000+1));
   const t = document.getElementById('throughput'); if(t) t.textContent = isFinite(throughput)?throughput:0;
   const ac = document.getElementById('agentCount'); if(ac) ac.textContent = agents.length;
-  const at = document.getElementById('activeTasks'); if(at) at.textContent = tasks.filter(t=>t.phase!=='Done').length;
+  const at = document.getElementById('activeTasks'); if(at) at.textContent = tasks.filter(t=>!t.done).length;
   const tc = document.getElementById('teamCount'); if(tc) tc.textContent = agents.length;
   currentPhaseIdx = (currentPhaseIdx + (Math.random()<0.02?1:0)) % PHASES.length;
   const ph = document.getElementById('phase'); if(ph) ph.textContent = PHASES[currentPhaseIdx];
@@ -866,10 +891,6 @@ function compact(v) {
 function pctOf(v) {
   return `${Math.round(num(v) * 100)}%`;
 }
-const PILL_CLASS = {
-  backlog: 'pill-backlog', ready: 'pill-ready', in_progress: 'pill-in_progress',
-  review: 'pill-review', blocked: 'pill-blocked', done: 'pill-done'
-};
 
 /** Sprint Board — current sprint + its tasks grouped by phase. */
 function renderBoard(agency) {
@@ -911,14 +932,14 @@ function renderBoard(agency) {
       const row = el('div', 'task');
       const taskHead = el('div', 't-head');
       taskHead.appendChild(el('span', 't-title', t.title || 'Untitled task'));
-      taskHead.appendChild(el('span', `pill ${PILL_CLASS[t.status] || 'pill-backlog'}`, t.status || 'unknown'));
+      taskHead.appendChild(el('span', `pill pill-${toneFor(t.status)}`, t.status || 'unknown'));
       row.appendChild(taskHead);
       const meta = el('div', 't-meta');
       meta.appendChild(el('span', null, nameOf(t.ownerId)));
       meta.appendChild(el('span', null, `${num(t.estimateHours)}h`));
       meta.appendChild(el('span', null, `${num(t.points)} pts`));
       row.appendChild(meta);
-      if (t.status === 'blocked' && t.blockedReason) row.appendChild(el('div', 't-blocked', t.blockedReason));
+      if (t.blockedReason) row.appendChild(el('div', 't-blocked', t.blockedReason));
       box.appendChild(row);
     }
   }

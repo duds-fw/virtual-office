@@ -82,8 +82,8 @@ function roleTokenState(matrixRole) {
  * `subagent` is the OpenCode subagent that actually performs the work.
  */
 const ROSTER = [
-  { id: 'orch',  name: 'Orchestrator',   title: 'Lead Orchestrator',   matrixRole: 'orchestrator_lead',              subagent: null,             capacityHours: 40, phases: PHASES },
-  { id: 'hermes',name: 'Hermes',         title: 'Dispatcher',          matrixRole: 'hermes_dispatcher',               subagent: 'hermes',         capacityHours: 20, phases: PHASES },
+  { id: 'orch',  name: 'Orchestrator',   title: 'Lead Orchestrator',   matrixRole: 'orchestrator_lead',              subagent: null,             capacityHours: 40, phases: PHASES, manager: true },
+  { id: 'hermes',name: 'Hermes',         title: 'Dispatcher',          matrixRole: 'hermes_dispatcher',               subagent: 'hermes',         capacityHours: 20, phases: PHASES, manager: true },
   { id: 'po',    name: 'Product Owner',  title: 'Product Mgmt',        matrixRole: 'product_owner_product_manager',  subagent: 'plan',           capacityHours: 24, phases: ['Planning', 'Analysis'] },
   { id: 'be',    name: 'Biz Enablement', title: 'Business Enablement', matrixRole: 'business_enablement',             subagent: 'general',        capacityHours: 16, phases: ['Planning', 'Analysis', 'Operations'] },
   { id: 'da',    name: 'Data Analyst',   title: 'Data Analyst',        matrixRole: 'data_analyst',                    subagent: 'explore',        capacityHours: 24, phases: ['Analysis', 'Planning'] },
@@ -109,6 +109,18 @@ const OPEN_STATUSES = ['ready', 'in_progress', 'review'];
  * 'review' stays in OPEN_STATUSES: work awaiting review still holds capacity.
  */
 const STATUSES = ['backlog', 'ready', 'in_progress', 'review', 'blocked', 'done', 'cancelled'];
+
+/**
+ * How a task status reads.
+ *
+ * The engine owns the vocabulary; the console maps a tone to pixels (D9).
+ * A status the engine adds later gets a tone here, and the console renders
+ * it with no change of its own.
+ */
+const STATUS_TONES = {
+  backlog: 'muted', ready: 'info', in_progress: 'warn', review: 'accent',
+  blocked: 'danger', done: 'ok', cancelled: 'muted',
+};
 
 /** An estimate is hours of work: finite and inside this range (F-12). */
 const MIN_ESTIMATE_HOURS = 0.25;
@@ -1522,8 +1534,48 @@ function markLessonApplied(lessonId) {
   return true;
 }
 
+/**
+ * The office's own vocabulary.
+ *
+ * The console may map semantic state to pixels; it may not own a list (D9).
+ * Everything it needs to know about the shape of the office comes from here,
+ * so adding a status, a phase or a role is an engine change alone.
+ */
+function vocabulary() {
+  const gatePhases = Object.keys(GATES);
+  return {
+    taskStatuses: STATUSES.slice(),
+    taskStatusTones: Object.fromEntries(STATUSES.map((s) => [s, STATUS_TONES[s] || 'muted'])),
+    projectStatuses: pipeline.PROJECT_STATUSES.slice(),
+    projectStages: pipeline.PROJECT_STAGE_ORDER.slice(),
+    phases: PHASES.slice(),
+    phaseRoles: PHASES.map((p) => ({
+      phase: p,
+      roles: ROSTER.filter((r) => r.phases.includes(p)).map((r) => r.matrixRole),
+    })),
+    gates: gatePhases.map((phase) => ({
+      phase,
+      id: GATES[phase].id,
+      label: GATES[phase].label,
+      approverRoles: GATES[phase].approverRoles.slice(),
+    })),
+    // The phase where work is released to production. The console counts
+    // deployments; it does not name the phase itself.
+    phaseFlags: { deploy: gatePhases.find((p) => GATES[p].id === 'security_signoff') || null },
+    roles: ROSTER.map((r) => ({
+      id: r.id,
+      name: r.name,
+      title: r.title,
+      matrixRole: r.matrixRole,
+      manager: !!r.manager,
+      phases: r.phases.slice(),
+    })),
+  };
+}
+
 module.exports = {
   PHASES,
+  STATUSES,
   GATES,
   ESCALATION_PATH,
   ROSTER,
@@ -1536,6 +1588,7 @@ module.exports = {
   metrics,
   standup,
   currentStandup,
+  vocabulary,
   workload,
   createProject,
   createSprint,
