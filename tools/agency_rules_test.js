@@ -319,8 +319,15 @@ console.log('--- escalation ladder ---');
     const notDone = agency.state().tasks.find((x) => x.id === deploy.id);
     check('the refused task is not done', !!notDone && notDone.status !== 'done', notDone && notDone.status);
     agency.approveGate(deploy.id, 'security_signoff', 'security_operations_soc');
+    // P3: the gate is not the only thing standing between a task and `done` —
+    // a deliverable naming what it produced is also required.
+    const noDeliverable = agency.setTaskStatus(deploy.id, 'done', 'shipped');
+    check('done is still refused without a deliverable (P3)',
+      noDeliverable.ok === false && noDeliverable.reason === 'missing_deliverable',
+      JSON.stringify(noDeliverable));
+    agency.updateTask(deploy.id, { deliverable: { kind: 'code', summary: 'Deployed the release', ref: 'abc1234' } });
     const allowed = agency.setTaskStatus(deploy.id, 'done', 'shipped');
-    check('done is accepted once the gate is approved',
+    check('done is accepted once the gate is approved and a deliverable exists',
       allowed.ok === true && !!allowed.task && allowed.task.status === 'done', JSON.stringify(allowed.ok));
 
     // F-12: an estimate is finite and within 0.25-200 hours.

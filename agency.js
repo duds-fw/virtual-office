@@ -12,6 +12,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const pipeline = require('./project-pipeline');
 
 const STATE_DIR = process.env.AGENCY_STATE_DIR || path.join(__dirname, 'state');
 const FILE = path.join(STATE_DIR, 'agency.json');
@@ -296,6 +297,13 @@ function taskById(id) {
   return load().tasks.find((t) => t.id === id) || null;
 }
 
+/** Task id -> task, for checks that need to look up referenced tasks. */
+function tasksById(d) {
+  const map = {};
+  for (const t of (d && d.tasks) || []) map[t.id] = t;
+  return map;
+}
+
 /** Hours an agent is currently committed to across all open tasks. */
 function loadFor(agentId) {
   const d = load();
@@ -324,21 +332,186 @@ function workload() {
 
 // ------------------------------------------------------------------- projects
 
-function createProject({ name, goal, client, budgetHours }) {
+/**
+ * Register a project.
+ *
+ * A project starts at `registered`. The stage machine lives in
+ * project-pipeline.js; this function only creates the record.
+ */
+function createProject({ name, goal, client, budgetHours, dueAt }) {
   const d = load();
   const p = {
     id: 'proj_' + Math.random().toString(36).slice(2, 8),
     name: name || 'Untitled project',
     goal: goal || '',
     client: client || 'internal',
-    status: 'active',
+    status: 'registered',
+    // The typed acceptance checklist. Populated at triage; required before
+    // the project may leave `triaged` (P2).
+    acceptanceCriteria: [],
+    // The delivery summary and its items, written on entering `acceptance`.
+    delivery: null,
     budgetHours: Number(budgetHours) || 480,
+    dueAt: dueAt === undefined || dueAt === null ? null : Number(dueAt),
+    triagedAt: null,
+    acceptedAt: null,
+    closedAt: null,
+    acceptedBy: null,
+    ratified: false,
     createdAt: Date.now(),
   };
   d.projects.unshift(p);
-  logActivity('Orchestrator', `opened project "${p.name}"`);
+  logActivity('Orchestrator', `registered project "${p.name}"`);
   save();
   return p;
+}
+
+/**
+ * Move a project to another stage.
+ *
+ * The rules live in project-pipeline.js; this function supplies the context
+ * (the project's tasks, sprints and checklist) and performs the move once the
+ * stage machine has approved it. The move is refused — not partially applied —
+ * when the machine says no.
+ *
+ * `actingRole` is the matrixRole making the move. It is never taken from the
+ * request body by the HTTP layer; the caller authenticates it.
+ */
+function transitionProject(projectId, toStatus, opts = {}) {
+  const d = load();
+  const project = d.projects.find((p) => p.id === projectId);
+  if (!project) return { ok: false, reason: 'project_not_registered', errors: [`unknown project ${projectId}`] };
+
+  const actingRole = opts.actingRole || null;
+  const criteria = Array.isArray(project.acceptanceCriteria) ? project.acceptanceCriteria : [];
+
+  const verdict = pipeline.canTransition(project.status, toStatus, {
+    actingRole,
+    project,
+    criteria,
+    tasksById: tasksById(d),
+    sprints: d.sprints,
+  });
+  if (!verdict.ok) {
+    logActivity('Orchestrator', `project "${project.name}" refused ${project.status} -> ${toStatus} (${verdict.reason})`);
+    return { ok: false, reason: verdict.reason, errors: verdict.errors, project };
+  }
+
+  const from = project.status;
+  project.status = toStatus;
+
+  const now = Date.now();
+  if (toStatus === 'triaged') project.triagedAt = now;
+  if (toStatus === 'acceptance') {
+    if (opts.delivery) project.delivery = opts.delivery;
+  }
+  if (toStatus === 'done') {
+    project.acceptedAt = now;
+    project.closedAt = now;
+    project.acceptedBy = actingRole;
+    project.ratified = actingRole === 'client';
+  }
+  if (toStatus === 'cancelled') {
+    project.closedAt = now;
+  }
+  // Moving back to planning is the "request changes" path: the acceptance
+  // verdict is cleared so the work can be redone and re-verified.
+  if (from === 'acceptance' && toStatus === 'planning') {
+    project.acceptedAt = null;
+    project.acceptedBy = null;
+    project.ratified = false;
+    for (const c of project.acceptanceCriteria) {
+      c.met = false;
+      c.evidence = null;
+    }
+  }
+
+  logActivity('Orchestrator', `project "${project.name}" ${from} -> ${toStatus}`);
+  save();
+  return { ok: true, project, from, to: toStatus };
+}
+
+/**
+ * Set the project's acceptance checklist.
+ * The checklist is typed (P2): every criterion carries falsifiable text.
+ */
+function setAcceptanceCriteria(projectId, criteria) {
+  const d = load();
+  const project = d.projects.find((p) => p.id === projectId);
+  if (!project) return { ok: false, reason: 'project_not_registered', errors: [`unknown project ${projectId}`] };
+  const normalised = (Array.isArray(criteria) ? criteria : []).map(pipeline.normaliseCriterion);
+  const v = pipeline.validateChecklist(normalised);
+  if (!v.ok) return { ok: false, reason: v.reason, errors: v.errors };
+  project.acceptanceCriteria = normalised;
+  save();
+  return { ok: true, project, criteria: normalised };
+}
+
+/**
+ * Record a criterion's verification verdict.
+ *
+ * `met` may only be set true when evidence is supplied (design doc §5:
+ * `verify` is refused with `criterion_unverified` if evidence is absent).
+ */
+function verifyCriterion(projectId, criterionId, met, evidence, opts = {}) {
+  const d = load();
+  const project = d.projects.find((p) => p.id === projectId);
+  if (!project) return { ok: false, reason: 'project_not_registered', errors: [`unknown project ${projectId}`] };
+  const c = (project.acceptanceCriteria || []).find((x) => x.id === criterionId);
+  if (!c) return { ok: false, reason: 'criterion_unverified', errors: [`unknown criterion ${criterionId}`] };
+  if (met === true && !evidence) {
+    return { ok: false, reason: 'criterion_unverified', errors: [`criterion ${criterionId} cannot be marked met without evidence`] };
+  }
+  c.met = met === true;
+  c.evidence = evidence === undefined || evidence === null ? null : evidence;
+  if (Array.isArray(opts.metBy)) c.metBy = opts.metBy.filter((x) => typeof x === 'string' && x);
+  save();
+  return { ok: true, project, criterion: c };
+}
+
+/** Project detail, including its delivery and the acceptance checklist. */
+function projectDetail(projectId) {
+  const d = load();
+  const project = d.projects.find((p) => p.id === projectId);
+  if (!project) return { ok: false, reason: 'project_not_registered' };
+  const tmap = tasksById(d);
+  const ownTasks = d.tasks.filter((t) => t.projectId === project.id);
+  return {
+    ok: true,
+    project: {
+      ...project,
+      active: pipeline.isActiveAlias(project.status),
+      progress: pipeline.projectProgress(project, tmap),
+    },
+    tasks: ownTasks.map((t) => ({
+      id: t.id, title: t.title, phase: t.phase, role: t.role, status: t.status,
+      estimateHours: t.estimateHours, ownerId: t.ownerId,
+      deliverable: t.deliverable || null,
+      acceptanceStatus: t.acceptanceStatus || 'pending',
+    })),
+    delivery: project.delivery || null,
+  };
+}
+
+/** All projects with their per-project status and progress. */
+function listProjects() {
+  const d = load();
+  const tmap = tasksById(d);
+  return {
+    ok: true,
+    projects: d.projects.map((p) => ({
+      id: p.id,
+      name: p.name,
+      goal: p.goal,
+      client: p.client,
+      status: p.status,
+      active: pipeline.isActiveAlias(p.status),
+      budgetHours: p.budgetHours,
+      dueAt: p.dueAt,
+      createdAt: p.createdAt,
+      ...pipeline.projectProgress(p, tmap),
+    })),
+  };
 }
 
 function createSprint({ projectId, name, goal, days }) {
@@ -599,6 +772,20 @@ function setTaskStatus(taskId, status, reason) {
   if (status === 'done' && gate && !(t.gates && t.gates[gate.id] === 'approved')) {
     return { ok: false, reason: 'gate_pending', gate: gate.id, label: gate.label, task: t };
   }
+  // A task may not be completed without a deliverable naming what it produced
+  // (P3). The check lives on the status write so it holds for every caller.
+  if (status === 'done') {
+    const dv = t.deliverable;
+    const summary = dv && typeof dv.summary === 'string' ? dv.summary.trim() : '';
+    if (!summary) {
+      return {
+        ok: false,
+        reason: 'missing_deliverable',
+        errors: ['a task cannot be marked done without a deliverable naming what it produced'],
+        task: t,
+      };
+    }
+  }
   t.status = status;
   if (status === 'in_progress' && !t.startedAt) t.startedAt = Date.now();
   if (status === 'done') {
@@ -749,17 +936,49 @@ function standup() {
 
 // -------------------------------------------------------------------- metrics
 
-function metrics() {
+/**
+ * Delivery metrics.
+ *
+ * Metrics are project-scoped (P6): pass a projectId and the numbers describe
+ * that project only; with no projectId they describe the office's active
+ * project. Metrics that are inherently office-wide (token spend, model
+ * routing) are labelled as such rather than being attributed to a project.
+ */
+function metrics(projectId) {
   const d = load();
   refreshEscalationLevels();
   const now = Date.now();
-  const done = d.tasks.filter((t) => t.status === 'done');
-  const open = d.tasks.filter((t) => t.status !== 'done');
 
-  const sprint = d.sprints.find((s) => s.status === 'active') || d.sprints[0] || null;
+  // Resolve the project this report is about. The active project is the one
+  // furthest along the pipeline, not merely the first in the list — with more
+  // than one project, "first" was the global-first-sprint bug.
+  let project = null;
+  if (projectId) {
+    project = d.projects.find((p) => p.id === projectId) || null;
+  } else {
+    const live = d.projects.filter((p) => pipeline.isActiveAlias(p.status) || p.status === 'acceptance');
+    project = live.sort((a, b) => {
+      const ai = pipeline.PROJECT_STAGE_ORDER.indexOf(a.status);
+      const bi = pipeline.PROJECT_STAGE_ORDER.indexOf(b.status);
+      return (bi === -1 ? 0 : bi) - (ai === -1 ? 0 : ai);
+    })[0] || d.projects[0] || null;
+  }
+  const pid = project ? project.id : null;
+
+  const scopeTasks = pid ? d.tasks.filter((t) => t.projectId === pid) : d.tasks;
+  const done = scopeTasks.filter((t) => t.status === 'done');
+  const open = scopeTasks.filter((t) => t.status !== 'done');
+
+  // The sprint must belong to the project being reported on.
+  const sprint = pid
+    ? (d.sprints.find((s) => s.projectId === pid && s.status === 'active') ||
+       d.sprints.find((s) => s.projectId === pid) || null)
+    : (d.sprints.find((s) => s.status === 'active') || d.sprints[0] || null);
   const sprintTasks = sprint ? d.tasks.filter((t) => t.sprintId === sprint.id) : [];
 
-  const velocity = d.sprints.map((s) => {
+  const velocity = d.sprints
+    .filter((s) => !pid || s.projectId === pid)
+    .map((s) => {
     const st = d.tasks.filter((t) => t.sprintId === s.id && t.status === 'done');
     return {
       sprintId: s.id,
@@ -827,6 +1046,25 @@ function metrics() {
       compliance: done.length ? completedOnTime / done.length : 1,
     },
     throughput: { completed: done.length, open: open.length },
+    // Which project this report describes, and how far that project is along
+    // the pipeline (P6).
+    project: project
+      ? {
+          id: project.id,
+          name: project.name,
+          status: project.status,
+          active: pipeline.isActiveAlias(project.status),
+          ...pipeline.projectProgress(project, tasksById(d)),
+        }
+      : null,
+    // Per-project progress for every project the office knows about.
+    projects: d.projects.map((p) => ({
+      id: p.id,
+      name: p.name,
+      status: p.status,
+      active: pipeline.isActiveAlias(p.status),
+      ...pipeline.projectProgress(p, tasksById(d)),
+    })),
     escalations: {
       open: d.escalations.filter((e) => !e.resolvedAt).length,
       byLevel: ESCALATION_PATH.map((s) => ({
@@ -894,6 +1132,34 @@ function updateTask(taskId, patch) {
 
   if (typeof patch.title === 'string' && patch.title.trim()) t.title = patch.title.trim();
   if (typeof patch.description === 'string') t.description = patch.description.trim();
+  // The deliverable names what the task produced (P3). It must be written
+  // before the task can close, so it is settable while the task is in flight.
+  // A deliverable of kind `code` must carry the commit SHA in `ref` — the
+  // office's own standard cannot check a code deliverable without one.
+  if (patch.deliverable !== undefined && patch.deliverable !== null) {
+    const dv = patch.deliverable;
+    if (typeof dv !== 'object' || Array.isArray(dv)) {
+      return { ok: false, reason: 'invalid_deliverable' };
+    }
+    const kind = typeof dv.kind === 'string' ? dv.kind.trim() : '';
+    if (!kind) return { ok: false, reason: 'invalid_deliverable' };
+    const summary = typeof dv.summary === 'string' ? dv.summary.trim() : '';
+    const ref = typeof dv.ref === 'string' ? dv.ref.trim() : '';
+    if (kind === 'code' && !ref) {
+      return {
+        ok: false,
+        reason: 'missing_deliverable_ref',
+        errors: ['a code deliverable must carry the commit SHA in ref'],
+      };
+    }
+    t.deliverable = {
+      kind,
+      summary,
+      ref: ref || null,
+      url: typeof dv.url === 'string' && dv.url.trim() ? dv.url.trim() : null,
+      at: Date.now(),
+    };
+  }
   if (estimate !== null) {
     t.estimateHours = estimate;
     t.points = pointsFor(estimate);
@@ -1140,6 +1406,14 @@ module.exports = {
   assignTask,
   advanceTask,
   setTaskStatus,
+  // --- project pipeline (Phase A) ---
+  transitionProject,
+  setAcceptanceCriteria,
+  verifyCriterion,
+  projectDetail,
+  listProjects,
+  tasksById,
+  pipeline,
   resolveEscalation,
   DECISION_POLICY,
   raiseDecision,
