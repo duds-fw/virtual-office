@@ -494,7 +494,7 @@ Only `product_owner_product_manager` or `client` may accept (SOP-3.3, P8).
 ### R-04 · Biz Enablement — `business_enablement`
 
 **Roster:** capacity 16 h/sprint · Planning, Analysis, Operations · subagent
-`general`.
+`researcher`.
 
 #### 1. Purpose
 Connect the office's technical output to the business it serves — adoption,
@@ -575,7 +575,7 @@ communicated (SOP-3.2).
 
 ### R-05 · Data Analyst — `data_analyst`
 
-**Roster:** capacity 24 h/sprint · Analysis, Planning · subagent `explore`.
+**Roster:** capacity 24 h/sprint · Analysis, Planning · subagent `scout`.
 
 #### 1. Purpose
 Establish what is actually true — the measurements the office decides on, and
@@ -957,7 +957,7 @@ whose schema it designed (SOP-3.2).
 
 ### R-09 · AI Eng — `ai_engineer`
 
-**Roster:** capacity 32 h/sprint · Design, Development · subagent `general`.
+**Roster:** capacity 32 h/sprint · Design, Development · subagent `researcher`.
 
 #### 1. Purpose
 Build and govern the office's AI behaviour — model routing, prompts, autonomy
@@ -1756,7 +1756,7 @@ sole evidence for a release it performed.
 
 ### R-17 · Service Desk — `it_support_service_desk`
 
-**Roster:** capacity 24 h/sprint · Operations · subagent `general`.
+**Roster:** capacity 24 h/sprint · Operations · subagent `researcher`.
 
 #### 1. Purpose
 Be the first line: receive reports from the office and its users, triage them

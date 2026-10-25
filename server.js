@@ -46,13 +46,20 @@ const AUTONOMY = {
   enabled: true,
   intervalMs: 15 * 60 * 1000,
   maxConcurrentRuns: 3,
-  maxStepsPerDay: 20,
+  // The ticker's daily ceiling. Measured against the paid model's weekly
+  // allowance: 2026-10-26 burned 39% of the week in about twelve hours, and
+  // the queue drain alone replayed 30+ steps in 46 minutes. The capacity plan
+  // supports roughly 57 steps a day (400 role-hours over a 14-day sprint), so
+  // 12 leaves the office working rather than starving it.
+  maxStepsPerDay: 12,
   maxTicksPerHour: 4,
   // Per-role daily token budget — the real control. A role that has spent it
   // is not given more work until the next local day.
-  roleTokenBudget: 2_000_000,
-  // Global backstop only. Should never be reached while per-role limits hold.
-  dailyTokenBudget: 34_000_000,
+  roleTokenBudget: 1_000_000,
+  // Global backstop. Set below the aggregate per-role ceiling (15 working
+  // roles x 1M) so it can actually bind — a backstop nothing can reach is not
+  // a backstop.
+  dailyTokenBudget: 12_000_000,
   startedAt: Date.now()
 };
 

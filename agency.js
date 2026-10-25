@@ -86,12 +86,12 @@ const ROSTER = [
   { id: 'orch',  name: 'Orchestrator',   title: 'Lead Orchestrator',   matrixRole: 'orchestrator_lead',              subagent: null,             capacityHours: 40, phases: PHASES, manager: true },
   { id: 'hermes',name: 'Hermes',         title: 'Dispatcher',          matrixRole: 'hermes_dispatcher',               subagent: 'hermes',         capacityHours: 20, phases: PHASES, manager: true },
   { id: 'po',    name: 'Product Owner',  title: 'Product Mgmt',        matrixRole: 'product_owner_product_manager',  subagent: 'plan',           capacityHours: 24, phases: ['Planning', 'Analysis'] },
-  { id: 'be',    name: 'Biz Enablement', title: 'Business Enablement', matrixRole: 'business_enablement',             subagent: 'general',        capacityHours: 16, phases: ['Planning', 'Analysis', 'Operations'] },
-  { id: 'da',    name: 'Data Analyst',   title: 'Data Analyst',        matrixRole: 'data_analyst',                    subagent: 'explore',        capacityHours: 24, phases: ['Analysis', 'Planning'] },
+  { id: 'be',    name: 'Biz Enablement', title: 'Business Enablement', matrixRole: 'business_enablement',             subagent: 'researcher',     capacityHours: 16, phases: ['Planning', 'Analysis', 'Operations'] },
+  { id: 'da',    name: 'Data Analyst',   title: 'Data Analyst',        matrixRole: 'data_analyst',                    subagent: 'scout',          capacityHours: 24, phases: ['Analysis', 'Planning'] },
   { id: 'ux',    name: 'UI/UX',          title: 'UI/UX Designer',      matrixRole: 'ui_ux_designer',                  subagent: 'frontend',       capacityHours: 32, phases: ['Design'] },
   { id: 'se',    name: 'Software Eng',   title: 'Software Engineer',   matrixRole: 'software_engineer',              subagent: 'build',          capacityHours: 40, phases: ['Development'] },
   { id: 'de',    name: 'Database Eng',   title: 'Database Engineer',   matrixRole: 'database_engineer',              subagent: 'database-engineer', capacityHours: 32, phases: ['Design', 'Development'] },
-  { id: 'aie',   name: 'AI Eng',         title: 'AI Engineer',         matrixRole: 'ai_engineer',                     subagent: 'general',        capacityHours: 32, phases: ['Design', 'Development'] },
+  { id: 'aie',   name: 'AI Eng',         title: 'AI Engineer',         matrixRole: 'ai_engineer',                     subagent: 'researcher',     capacityHours: 32, phases: ['Design', 'Development'] },
   { id: 'qa',    name: 'QA',             title: 'Quality Assurance',   matrixRole: 'quality_assurance',              subagent: 'tester',         capacityHours: 32, phases: ['Review'] },
   { id: 'ns',    name: 'NetSec',         title: 'Network & Security',  matrixRole: 'network_and_security',           subagent: 'security-auditor',capacityHours: 24, phases: ['Review', 'Operations'] },
   { id: 'soc',   name: 'SOC',            title: 'Security Operations', matrixRole: 'security_operations_soc',         subagent: 'security-auditor',capacityHours: 20, phases: ['Review', 'Operations'] },
@@ -99,7 +99,7 @@ const ROSTER = [
   { id: 'ce',    name: 'Cloud Eng',      title: 'Cloud Engineer',      matrixRole: 'cloud_engineer',                  subagent: 'devops',         capacityHours: 24, phases: ['Deployment', 'Operations'] },
   { id: 'iti',   name: 'IT Infra',       title: 'IT Infrastructure',   matrixRole: 'it_infrastructure',              subagent: 'devops',         capacityHours: 24, phases: ['Deployment', 'Operations'] },
   { id: 'dba',   name: 'DBA',            title: 'Database Admin',      matrixRole: 'database_administrator',         subagent: 'devops',         capacityHours: 20, phases: ['Deployment', 'Operations'] },
-  { id: 'sd',    name: 'Service Desk',   title: 'IT Support',          matrixRole: 'it_support_service_desk',        subagent: 'general',        capacityHours: 24, phases: ['Operations'] },
+  { id: 'sd',    name: 'Service Desk',   title: 'IT Support',          matrixRole: 'it_support_service_desk',        subagent: 'researcher',     capacityHours: 24, phases: ['Operations'] },
 ];
 
 const OPEN_STATUSES = ['ready', 'in_progress', 'review'];
