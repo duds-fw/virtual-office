@@ -223,9 +223,75 @@ function digest(state, metrics, tokens, decisions, queue, savings, lessons) {
     }
   }
 
+  // 10. Budget report items — the office never exceeds a project budget. When
+  // the work genuinely needs more hours than the budget allows, that becomes a
+  // report item here: the overrun, the reason, and the options. The owner
+  // raises the budget; the office does not spend past it.
+  const budgetItems = budgetReport(state);
+  if (budgetItems.length) {
+    lines.push('');
+    lines.push(`<b>📋 Budget report (${budgetItems.length})</b> — for your decision, not yet spent`);
+    for (const b of budgetItems.slice(0, 5)) {
+      lines.push(`• <b>${b.projectName}</b>: ${b.spent}h of ${b.budget}h used · ${b.overrun > 0 ? `<b>needs ${b.overrun}h more</b>` : `${b.remaining}h remaining`}`);
+      if (b.reason) lines.push(`  <i>${b.reason}</i>`);
+      if (b.options && b.options.length) lines.push(`  Options: ${b.options.join(' | ')}`);
+    }
+  }
+
   lines.push('');
   lines.push('Reply /status for a fresh snapshot, /decisions for anything waiting on you.');
   return lines.join('\n');
+}
+
+/**
+ * Budget report items.
+ *
+ * The office is held to its project budget (decision D7.1): it does not spend
+ * past the line. What it does instead is report the shortfall — the overrun,
+ * why it exists, and the concrete options — and let the owner decide whether
+ * to raise the budget.
+ *
+ * A project is reported when its committed work (the sum of its open tasks'
+ * estimates) plus what it has already spent would exceed the budget, or when
+ * it has already exceeded it. Committed work is counted rather than completed
+ * work alone, because an overrun is visible before the hours are spent.
+ */
+function budgetReport(state) {
+  const tasks = state.tasks || [];
+  const projects = state.projects || [];
+  const items = [];
+
+  for (const p of projects) {
+    if (p.status === 'done' || p.status === 'cancelled') continue;
+    const budget = Number(p.budgetHours) || 0;
+    if (!budget) continue;
+
+    const ptasks = tasks.filter((t) => t.projectId === p.id);
+    // Committed = estimated hours of everything still open.
+    const committed = ptasks
+      .filter((t) => t.status !== 'done' && t.status !== 'cancelled')
+      .reduce((n, t) => n + (Number(t.estimateHours) || 0), 0);
+    // Spent = estimated hours of what is already finished.
+    const spent = ptasks
+      .filter((t) => t.status === 'done')
+      .reduce((n, t) => n + (Number(t.estimateHours) || 0), 0);
+
+    const overrun = committed + spent - budget;
+    if (overrun <= 0) continue;
+
+    items.push({
+      projectId: p.id,
+      projectName: p.name || p.id,
+      budget,
+      spent,
+      committed,
+      overrun,
+      reason: p.budgetReason || 'committed work exceeds the budget',
+      options: p.budgetOptions || ['raise budget', 'cut scope', 'extend deadline'],
+    });
+  }
+
+  return items;
 }
 
 /** A single message for one authority item. */
@@ -240,4 +306,4 @@ function authorityMessage(item) {
   return lines.join('\n');
 }
 
-module.exports = { SEV, authorityItems, digest, authorityMessage, queuedWork };
+module.exports = { SEV, authorityItems, digest, authorityMessage, queuedWork, budgetReport };

@@ -429,6 +429,18 @@ genuinely needs more hours, that becomes a **report item** in the owner's digest
 with the specific overrun, the reason, and the options — it does not become an
 overrun. The owner raises the budget; the office does not.
 
+**Mechanism.** `briefing.js` gains a `budgetReport(state)` function and a
+**📋 Budget report** section in the daily digest. A project is reported when its
+*committed* work (the sum of its open tasks' estimates) plus what it has already
+spent would exceed `budgetHours`. Committed work is counted, not just completed
+work, because an overrun is visible **before** the hours are spent — the point
+is to give the owner the decision while it is still cheap to make.
+
+The section is a **digest** item, not an authority interrupt: it reports, it
+does not block. A project inside its budget never appears in it. Cancelled tasks
+and closed projects do not count. Covered by `tools/budget_report_test.js`
+(14 assertions).
+
 ### D2 — Acceptance authority: RACI, PO accepts, owner ratifies
 
 > *"Pick the role of how to deliver and what is responsible. Make it in RACI."*
