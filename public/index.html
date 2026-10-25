@@ -15,7 +15,7 @@
   * { box-sizing:border-box; margin:0; padding:0; }
   html,body { height:100%; background:var(--bg); color:var(--text);
     font-family:'Inter',system-ui,sans-serif; overflow:hidden; }
-  .app { display:grid; grid-template-rows:52px 1fr 120px; height:100vh; gap:8px; padding:8px; }
+  .app { display:grid; grid-template-rows:52px 1fr; height:100vh; gap:8px; padding:8px; }
   header { display:flex; align-items:center; justify-content:space-between;
     background:var(--panel); border:1px solid var(--border); border-radius:12px;
     padding:0 16px; backdrop-filter:blur(10px); }
@@ -146,26 +146,139 @@
   .esc-btn { background:transparent; border:1px solid var(--border); color:var(--muted); border-radius:6px;
     padding:2px 7px; font-size:8px; text-transform:uppercase; letter-spacing:.06em; cursor:pointer; font-family:inherit; }
   .esc-btn:disabled { opacity:.5; cursor:default; }
+
+  /* ---- view switch (Dashboard / Office) ---- */
+  .viewnav { display:flex; gap:3px; background:rgba(15,23,42,0.6); border:1px solid var(--border);
+    border-radius:99px; padding:3px; }
+  .vnav-btn { background:transparent; border:none; color:var(--muted); font-family:inherit;
+    font-size:11px; padding:4px 13px; border-radius:99px; cursor:pointer; }
+  .vnav-btn:hover { color:var(--text); }
+  .vnav-btn.is-active { background:var(--accent); color:#06233a; font-weight:600; }
+  .views { min-height:0; display:grid; grid-template-rows:1fr; }
+  .view { grid-row:1; grid-column:1; min-height:0; min-width:0; overflow:auto; }
+  .view.is-hidden { display:none; }
+
+  /* ---- monitoring dashboard ---- */
+  .dash { height:100%; overflow:auto; display:grid; gap:8px; align-content:start; }
+  .dash-toolbar { display:flex; align-items:center; justify-content:space-between; gap:10px;
+    font-size:11px; color:var(--muted); }
+  .dash-toolbar b { color:var(--text); }
+  .dash-btn { background:rgba(15,23,42,0.6); border:1px solid var(--border); color:var(--text);
+    border-radius:6px; padding:4px 10px; font-size:11px; font-family:inherit; cursor:pointer; }
+  .dash-btn:hover { border-color:var(--accent); }
+  .dash-btn:disabled { opacity:.5; cursor:default; }
+  .dash-error { background:rgba(239,68,68,0.12); border:1px solid rgba(239,68,68,0.4);
+    border-radius:8px; padding:6px 10px; font-size:11px; color:var(--danger); }
+  .dash-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; align-items:start; }
+  .dash-grid.is-stale { opacity:.5; }
+  .card { background:var(--panel); border:1px solid var(--border); border-radius:12px;
+    backdrop-filter:blur(10px); overflow:hidden; display:flex; flex-direction:column; }
+  .card.span2 { grid-column:span 2; }
+  .card h3 { margin:0; padding:8px 12px; font-size:11px; text-transform:uppercase; color:var(--muted);
+    border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; gap:8px; }
+  .card h3 .card-note { font-size:9px; text-transform:none; letter-spacing:0; color:var(--muted); }
+  .card .body { padding:9px 12px; display:grid; gap:7px; }
+  .advice { background:rgba(15,23,42,0.5); border-left:2px solid var(--accent); border-radius:8px;
+    padding:6px 8px; font-size:11px; line-height:1.4; }
+  .note { font-size:10px; color:var(--muted); }
+  .note-danger { color:var(--danger); }
+  .note-warn { color:var(--warn); }
+  .note-ok { color:var(--ok); }
+  .bar-row { display:grid; gap:3px; }
+  .bar-head { display:flex; justify-content:space-between; align-items:baseline; gap:8px; font-size:10px; }
+  .bar-head .bar-label { color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .bar-head .bar-value { color:var(--muted); white-space:nowrap; }
+  .bar { height:7px; background:rgba(15,23,42,0.6); border:1px solid var(--border); border-radius:4px; overflow:hidden; }
+  .bar-fill { height:100%; background:linear-gradient(90deg,#0ea5e9,#38bdf8); }
+  .bar-fill.ok { background:linear-gradient(90deg,#16a34a,#22c55e); }
+  .bar-fill.warn { background:linear-gradient(90deg,#d97706,#f59e0b); }
+  .bar-fill.danger { background:linear-gradient(90deg,#dc2626,#ef4444); }
+  .dot { width:7px; height:7px; border-radius:50%; display:inline-block; flex-shrink:0; }
+  .dot-ok { background:var(--ok); box-shadow:0 0 5px var(--ok); }
+  .dot-warn { background:var(--warn); }
+  .dot-danger { background:var(--danger); }
+  .dot-mute { background:#475569; }
+  .tier { background:rgba(15,23,42,0.5); border:1px solid var(--border); border-radius:8px; padding:7px 8px;
+    display:grid; gap:5px; }
+  .tier.serving { border-color:rgba(56,189,248,0.55); }
+  .tier-head { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+  .tier-name { font-size:11px; font-weight:600; }
+  .tier-meta { font-size:9px; color:var(--muted); display:flex; align-items:center; gap:6px; }
+  .model { display:grid; gap:2px; padding:4px 0; border-top:1px dashed rgba(148,163,184,0.12); }
+  .model-head { display:flex; align-items:center; gap:6px; font-size:10px; }
+  .model-name { color:var(--text); flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .model-meta { font-size:9px; color:var(--muted); padding-left:13px; }
+  .pill-ok { color:var(--ok); border-color:rgba(34,197,94,.35); }
+  .pill-warn { color:var(--warn); border-color:rgba(245,158,11,.35); }
+  .pill-danger { color:var(--danger); border-color:rgba(239,68,68,.45); }
+  .pill-accent { color:var(--accent); border-color:rgba(56,189,248,.35); }
+  @media (max-width:1080px) {
+    .dash-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  }
+  @media (max-width:680px) {
+    .dash-grid { grid-template-columns:1fr; }
+    .card.span2 { grid-column:span 1; }
+  }
 </style>
 </head>
 <body>
 <div class="app">
   <header>
     <div class="brand"><img src="assets/duDdev-mark.png?v=4" alt="duDDev" style="height:26px;width:auto;display:inline-block;vertical-align:middle;"><img src="assets/duDdev-wordmark.png?v=4" alt="" style="height:22px;width:auto;display:inline-block;vertical-align:middle;margin-left:9px;"></div>
+    <nav class="viewnav" id="viewNav" aria-label="Views">
+      <button type="button" class="vnav-btn is-active" data-view="dashboard">Dashboard</button>
+      <button type="button" class="vnav-btn" data-view="office">Office</button>
+    </nav>
     <div style="display:flex;align-items:center;gap:12px;font-size:12px;color:var(--muted);">
       <span>Workforce: <b id="opencodeStatus" style="color:var(--warn)">booting…</b></span>
       <button onclick="toggleMenu()" style="background:var(--panel);border:1px solid var(--border);color:var(--text);padding:4px 10px;border-radius:6px;cursor:pointer;font-size:11px;font-family:inherit;">Menu</button>
     </div>
   </header>
 
-  <main class="scene-wrap">
-    <div id="scene"></div>
-    <div class="overlay">
-      <div class="stat">Phase: <b id="phase">Planning</b></div>
-      <div class="stat">Throughput: <b id="throughput">0</b>/hr</div>
-    </div>
-    <div class="hint">Drag to orbit · Scroll to zoom</div>
-  </main>
+  <div class="views">
+    <section class="view" id="view-dashboard" aria-label="Dashboard">
+      <div class="dash">
+        <div class="dash-toolbar">
+          <div>Capacity · updated <b id="capUpdated">never</b></div>
+          <button type="button" class="dash-btn" id="capRefresh">Refresh</button>
+        </div>
+        <div class="dash-error" id="capError" hidden></div>
+        <div class="dash-grid" id="capGrid">
+          <section class="card span2">
+            <h3>Office health</h3>
+            <div class="body" id="capHealth"></div>
+          </section>
+          <section class="card">
+            <h3>Host <span class="card-note" id="capPressure"></span></h3>
+            <div class="body" id="capHost"></div>
+          </section>
+          <section class="card">
+            <h3>Model hierarchy <span class="card-note" id="capServing"></span></h3>
+            <div class="body" id="capHierarchy"></div>
+          </section>
+          <section class="card">
+            <h3>Token plan <span class="card-note" id="capPlanNote"></span></h3>
+            <div class="body" id="capPlan"></div>
+          </section>
+          <section class="card">
+            <h3>Quota rotation <span class="card-note" id="capQuotaNote"></span></h3>
+            <div class="body" id="capQuota"></div>
+          </section>
+        </div>
+      </div>
+    </section>
+
+    <section class="view is-hidden" id="view-office" aria-label="Office">
+      <main class="scene-wrap">
+        <div id="scene"></div>
+        <div class="overlay">
+          <div class="stat">Phase: <b id="phase">Planning</b></div>
+          <div class="stat">Throughput: <b id="throughput">0</b>/hr</div>
+        </div>
+        <div class="hint">Drag to orbit · Scroll to zoom</div>
+      </main>
+    </section>
+  </div>
 
 </div>
 
@@ -182,17 +295,23 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 const feedLines = [];
+/** Which of the two views is on screen: 'dashboard' (landing) or 'office'. */
+let currentView = 'dashboard';
 
 const container = document.getElementById('scene');
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xdbeafe);
 scene.fog = new THREE.Fog(0xdbeafe, 38, 65);
 
-const camera = new THREE.PerspectiveCamera(45, container.clientWidth/container.clientHeight, 0.1, 200);
+// The office view starts hidden, so the canvas has no size yet: fall back to a
+// sane one and fit the real size when the view is shown.
+const initW = container.clientWidth || 960;
+const initH = container.clientHeight || 540;
+const camera = new THREE.PerspectiveCamera(45, initW/initH, 0.1, 200);
 camera.position.set(0, 20, 24);
 
 const renderer = new THREE.WebGLRenderer({ antialias:true });
-renderer.setSize(container.clientWidth, container.clientHeight);
+renderer.setSize(initW, initH);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -600,9 +719,19 @@ syncOpenCodeLive();
 
 /* ---------- Animation ---------- */
 const clock3 = new THREE.Clock();
+/** The office view is not always on screen; the loop pauses with it. */
+let sceneActive = false;
+let rafId = null;
+/** Size the renderer and camera to the office view (which may have just been shown). */
+function fitScene() {
+  const w = container.clientWidth, h = container.clientHeight;
+  if (!w || !h) return;
+  camera.aspect = w/h; camera.updateProjectionMatrix(); renderer.setSize(w,h);
+}
 function animate() {
-  requestAnimationFrame(animate);
+  rafId = requestAnimationFrame(animate);
   const dt = Math.min(clock3.getDelta(), 0.05);
+  if (!sceneActive) return;
   const t = performance.now();
   for (const a of agents) {
     const dx = a.tx - a.x, dz = a.tz - a.z;
@@ -640,7 +769,14 @@ function animate() {
   controls.update();
   renderer.render(scene, camera);
 }
-animate();
+/** Pause/resume the scene loop with the office view. One loop, never two. */
+function setSceneActive(on) {
+  if (sceneActive === on) return;
+  sceneActive = on;
+  if (on) { if (rafId === null) animate(); }
+  else if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
+}
+setSceneActive(currentView === 'office');
 
 function toggleMenu() {
   const p = document.getElementById('menu-popup');
@@ -1225,10 +1361,392 @@ document.addEventListener('click', (e) => {
     document.getElementById('menu-popup').classList.remove('active');
   }
 });
-window.addEventListener('resize', () => {
-  const w = container.clientWidth, h = container.clientHeight;
-  if (w && h) { camera.aspect = w/h; camera.updateProjectionMatrix(); renderer.setSize(w,h); }
+window.addEventListener('resize', fitScene);
+
+/* ---------- View switch: Dashboard / Office ---------- */
+
+/**
+ * Show one view, hide the other. The office scene is not destroyed: it is
+ * paused while hidden and resumed (and re-fitted) when it comes back.
+ */
+function setView(name) {
+  const dash = document.getElementById('view-dashboard');
+  const office = document.getElementById('view-office');
+  if (!dash || !office) return;
+  currentView = name === 'office' ? 'office' : 'dashboard';
+  dash.classList.toggle('is-hidden', currentView !== 'dashboard');
+  office.classList.toggle('is-hidden', currentView !== 'office');
+  for (const b of document.querySelectorAll('#viewNav .vnav-btn')) {
+    b.classList.toggle('is-active', b.getAttribute('data-view') === currentView);
+  }
+  if (currentView === 'office') { fitScene(); setSceneActive(true); }
+  else setSceneActive(false);
+  if (currentView === 'dashboard') capStart();
+}
+const viewNav = document.getElementById('viewNav');
+if (viewNav) {
+  viewNav.addEventListener('click', (e) => {
+    const b = e.target.closest('.vnav-btn');
+    if (b) setView(b.getAttribute('data-view'));
+  });
+}
+
+/* ---------- Monitoring dashboard (GET /api/agency/capacity) ---------- */
+/*
+ * The dashboard renders the engine's capacity read model. Every value that
+ * comes from the API is placed as text (el() -> textContent), never parsed
+ * as markup: an API string is untrusted text.
+ */
+const CAP_URL = '/api/agency/capacity';
+const CAP_REFRESH_MS = 10000;
+
+/** Any API value as plain text. */
+function capText(v) {
+  if (v === null || v === undefined) return '';
+  if (typeof v === 'string') return v;
+  if (typeof v === 'object') { try { return JSON.stringify(v); } catch (_) { return String(v); } }
+  return String(v);
+}
+/** "2h 35m" from a millisecond span. */
+function capSpan(ms) {
+  const mins = Math.max(0, Math.round(num(ms) / 60000));
+  const h = Math.floor(mins / 60);
+  return h ? `${h}h ${mins % 60}m` : `${mins}m`;
+}
+/** "2d 3h" from a second span. */
+function capUptime(sec) {
+  const s = Math.max(0, Math.round(num(sec)));
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  if (d) return `${d}d ${h}h`;
+  if (h) return `${h}h ${m}m`;
+  return `${m}m`;
+}
+/** "2.7 GB" from a byte count. */
+function capBytes(v) {
+  const n = num(v, 0);
+  if (!n) return '0 B';
+  const units = ['B','KB','MB','GB','TB'];
+  let i = 0, x = n;
+  while (x >= 1024 && i < units.length - 1) { x /= 1024; i++; }
+  return `${(i === 0 || x >= 100) ? Math.round(x) : x.toFixed(1)} ${units[i]}`;
+}
+/** A percentage the API already gave us. */
+function capPct(v) { return `${Math.round(num(v, 0) * 10) / 10}%`; }
+/** Local clock for a timestamp; "—" when there is none. */
+function capClock(ts) {
+  const n = num(ts, 0);
+  if (!n) return '—';
+  return new Date(n).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+/** Tone for a "how full is it" percentage: high is bad. */
+function capLoadTone(pct) {
+  const n = num(pct, 0);
+  return n >= 90 ? 'danger' : n >= 75 ? 'warn' : '';
+}
+/** Tone for a "how much is left" percentage: low is bad. */
+function capLeftTone(pct) {
+  const n = num(pct, 0);
+  return n <= 20 ? 'danger' : n <= 50 ? 'warn' : '';
+}
+/** A labelled bar: name left, value right, fill underneath. */
+function capBar(label, valueText, percent, tone) {
+  const row = el('div', 'bar-row');
+  const head = el('div', 'bar-head');
+  head.appendChild(el('span', 'bar-label', label));
+  head.appendChild(el('span', 'bar-value', valueText));
+  const bar = el('div', 'bar');
+  const fill = el('div', tone ? `bar-fill ${tone}` : 'bar-fill');
+  fill.style.width = `${Math.max(0, Math.min(100, num(percent, 0)))}%`;
+  bar.appendChild(fill);
+  row.appendChild(head);
+  row.appendChild(bar);
+  return row;
+}
+/** A small pill badge. */
+function capPill(text, tone) {
+  return el('span', tone ? `pill pill-${tone}` : 'pill', text);
+}
+/** A stat tile: label, value, sub-line. */
+function capTile(label, value, sub) {
+  const t = el('div', 'tile');
+  t.appendChild(el('div', 'tile-label', label));
+  t.appendChild(el('div', 'tile-value', value));
+  t.appendChild(el('div', 'tile-sub', sub || ''));
+  return t;
+}
+
+/* ---- Office health ---- */
+function renderCapHealth(d) {
+  const box = document.getElementById('capHealth');
+  if (!box) return;
+  box.textContent = '';
+  const advice = Array.isArray(d.advice) ? d.advice : [];
+  for (const line of advice) box.appendChild(el('div', 'advice', capText(line)));
+  if (!advice.length) box.appendChild(el('div', 'note', 'No advice from the engine.'));
+
+  const a = (d.autonomy && typeof d.autonomy === 'object') ? d.autonomy : {};
+  const alive = a.enabled !== false && !a.stopped;
+  const state = alive ? 'alive' : (a.stopped ? 'stopped' : 'disabled');
+  const grid = el('div', 'tile-grid');
+  grid.appendChild(capTile('Autonomy', state,
+    alive ? `every ${capSpan(a.intervalMs)}` : (a.stopped ? 'stopped by the owner' : 'not enabled')));
+  grid.appendChild(capTile('Ticks / hour', String(num(a.ticksLastHour)), `cap ${num(a.maxTicksPerHour)}`));
+  grid.appendChild(capTile('Steps today', `${num(a.stepsToday)} / ${num(a.maxStepsPerDay)}`, `${num(a.queuedStepsToday)} queued`));
+  grid.appendChild(capTile('Active runs', String(num(a.activeRuns)),
+    a.lastTickAt ? `last tick ${capClock(a.lastTickAt)}` : 'no tick yet'));
+  box.appendChild(grid);
+
+  const refusal = a.lastRefusal;
+  if (refusal && typeof refusal === 'object') {
+    const parts = [];
+    if (refusal.reason) parts.push(capText(refusal.reason));
+    if (refusal.consumer) parts.push(capText(refusal.consumer));
+    if (refusal.limit && refusal.limit.name) {
+      parts.push(`limit ${capText(refusal.limit.name)} ${num(refusal.limit.value)} / ${num(refusal.limit.max)}`);
+    }
+    if (refusal.at) parts.push(capClock(refusal.at));
+    if (parts.length) box.appendChild(el('div', 'note note-warn', `Last refusal: ${parts.join(' · ')}`));
+  } else if (refusal) {
+    box.appendChild(el('div', 'note note-warn', `Last refusal: ${capText(refusal)}`));
+  }
+}
+
+/* ---- Host ---- */
+function renderCapHost(d) {
+  const box = document.getElementById('capHost');
+  const note = document.getElementById('capPressure');
+  const r = (d.resources && typeof d.resources === 'object') ? d.resources : {};
+  const load = (r.load && typeof r.load === 'object') ? r.load : {};
+  const mem = (r.memory && typeof r.memory === 'object') ? r.memory : {};
+  const disk = (r.disk && typeof r.disk === 'object') ? r.disk : null;
+
+  const pressure = capText(r.pressure) || 'unknown';
+  const pressureTone = pressure === 'critical' ? 'danger' : (pressure === 'busy' || pressure === 'elevated') ? 'warn' : 'ok';
+  if (note) { note.textContent = ''; note.appendChild(capPill(pressure, pressureTone)); }
+
+  if (!box) return;
+  box.textContent = '';
+  const grid = el('div', 'tile-grid');
+  grid.appendChild(capTile('CPUs', String(num(r.cpus)), 'host processors'));
+  grid.appendChild(capTile('Load 1 / 5 / 15', `${num(load.one)} / ${num(load.five)} / ${num(load.fifteen)}`, 'run queue'));
+  grid.appendChild(capTile('Load per CPU', String(num(r.loadPerCpu)), 'queue length per core'));
+  grid.appendChild(capTile('Memory', capPct(mem.usedPercent),
+    `${capBytes(mem.usedBytes)} of ${capBytes(mem.totalBytes)}`));
+  grid.appendChild(capTile('Disk', disk ? capPct(disk.usedPercent) : '—',
+    disk ? `${capBytes(disk.usedBytes)} of ${capBytes(disk.totalBytes)} on ${capText(disk.path)}` : 'no disk reading'));
+  grid.appendChild(capTile('Uptime', capUptime(r.uptimeSeconds), 'host uptime'));
+  box.appendChild(grid);
+}
+
+/* ---- Model hierarchy ---- */
+function capModelRow(m) {
+  const row = el('div', 'model');
+  const head = el('div', 'model-head');
+  const health = m.healthy === true ? 'ok' : m.healthy === false ? 'danger' : 'mute';
+  head.appendChild(el('span', `dot dot-${health}`));
+  head.appendChild(el('span', 'model-name', capText(m.key) || `${capText(m.providerID)}/${capText(m.modelID)}`));
+  head.appendChild(capPill(
+    m.healthy === true ? 'healthy' : m.healthy === false ? 'unhealthy' : 'unknown',
+    m.healthy === true ? 'ok' : m.healthy === false ? 'danger' : ''));
+  row.appendChild(head);
+  const meta = [`served ${num(m.served)}`, `failed ${num(m.failures)}`];
+  if (m.healthStale) meta.push('health check stale');
+  if (m.coolingDown) meta.push(`cooling down for ${capSpan(m.coolingForMs)}`);
+  if (m.lastError) meta.push(capText(m.lastError));
+  row.appendChild(el('div', 'model-meta', meta.join(' · ')));
+  return row;
+}
+function renderCapHierarchy(d) {
+  const box = document.getElementById('capHierarchy');
+  const note = document.getElementById('capServing');
+  const h = (d.hierarchy && typeof d.hierarchy === 'object') ? d.hierarchy : {};
+  const tiers = Array.isArray(h.tiers) ? h.tiers : [];
+  const models = Array.isArray(h.models) ? h.models : [];
+  const serving = h.servingTier ? capText(h.servingTier) : '';
+
+  if (note) {
+    note.textContent = '';
+    note.appendChild(serving ? capPill(`serving: ${serving}`, 'accent') : capPill('no model can serve', 'danger'));
+  }
+  if (!box) return;
+  box.textContent = '';
+  if (!serving) {
+    box.appendChild(el('div', 'note note-danger',
+      'No model can serve right now — the office queues its work until a provider frees up.'));
+  }
+  if (!tiers.length) box.appendChild(el('div', 'note', 'No tiers reported.'));
+  for (const tier of tiers) {
+    const t = (tier && typeof tier === 'object') ? tier : {};
+    const isServing = !!serving && capText(t.tier) === serving;
+    const block = el('div', isServing ? 'tier serving' : 'tier');
+    const head = el('div', 'tier-head');
+    head.appendChild(el('span', 'tier-name', capText(t.label) || capText(t.tier) || 'tier'));
+    const meta = el('span', 'tier-meta');
+    meta.appendChild(capPill(`${num(t.usable)} / ${num(t.total)} usable`, num(t.usable) > 0 ? 'ok' : 'danger'));
+    head.appendChild(meta);
+    block.appendChild(head);
+    if (isServing) block.appendChild(el('div', 'note note-ok', 'This tier is serving the office right now.'));
+    const rows = models.filter((m) => m && typeof m === 'object' && capText(m.tier) === capText(t.tier));
+    if (!rows.length) block.appendChild(el('div', 'note', 'No models in this tier.'));
+    for (const m of rows) block.appendChild(capModelRow(m));
+    box.appendChild(block);
+  }
+}
+
+/* ---- Token plan ---- */
+function renderCapPlan(d) {
+  const box = document.getElementById('capPlan');
+  const note = document.getElementById('capPlanNote');
+  const p = (d.plan && typeof d.plan === 'object') ? d.plan : {};
+  const usedPct = num(p.usedPercent, 0);
+  if (note) {
+    note.textContent = '';
+    note.appendChild(p.willExhaustToday ? capPill('runs out today', 'danger') : capPill('on budget', 'ok'));
+  }
+  if (!box) return;
+  box.textContent = '';
+  box.appendChild(capBar('Daily budget', `${compact(p.spentTokens)} / ${compact(p.dailyBudgetTokens)}`, usedPct, capLoadTone(usedPct)));
+
+  const grid = el('div', 'tile-grid');
+  grid.appendChild(capTile('Burn rate', `${compact(p.burnRatePerHour)} /hr`, 'tokens per hour'));
+  grid.appendChild(capTile('Left in the day', `${num(p.hoursLeftInDay)}h`, 'until the budget resets'));
+  const proj = p.projectedExhaustionHours;
+  grid.appendChild(capTile('Projected',
+    (proj === null || proj === undefined) ? 'on budget' : `in ${num(proj)}h`,
+    p.projectedExhaustionAt ? `at ${capClock(p.projectedExhaustionAt)}` : 'no exhaustion projected'));
+  grid.appendChild(capTile('Remaining', compact(p.remainingTokens), 'tokens left today'));
+  box.appendChild(grid);
+
+  const roles = Array.isArray(p.roles) ? p.roles : [];
+  if (!roles.length) {
+    box.appendChild(el('div', 'note', 'No per-role budget reported.'));
+    return;
+  }
+  box.appendChild(el('div', 'note', 'Per-role budget'));
+  for (const r of roles) {
+    const role = (r && typeof r === 'object') ? r : {};
+    const pct = num(role.usedPercent, 0);
+    const row = capBar(capText(role.role) || 'role',
+      `${compact(role.usedTokens)} / ${compact(role.budgetTokens)}`,
+      pct, role.exhausted ? 'danger' : capLoadTone(pct));
+    if (role.exhausted) row.querySelector('.bar-head').appendChild(capPill('exhausted', 'danger'));
+    box.appendChild(row);
+  }
+}
+
+/* ---- Quota rotation ---- */
+/** The windows inside a quota entry, whatever the engine names them. */
+function capWindowsOf(entry) {
+  const out = [];
+  for (const [k, v] of Object.entries(entry || {})) {
+    if (v && typeof v === 'object' && !Array.isArray(v) && ('remainingPercent' in v || 'resetsInMs' in v)) {
+      out.push({ key: k, win: v });
+    }
+  }
+  return out;
+}
+function renderCapQuota(d) {
+  const box = document.getElementById('capQuota');
+  const note = document.getElementById('capQuotaNote');
+  const q = (d.quota && typeof d.quota === 'object') ? d.quota : {};
+  if (note) {
+    note.textContent = '';
+    note.appendChild(q.ok === false ? capPill('unavailable', 'danger') : capPill('live', 'ok'));
+  }
+  if (!box) return;
+  box.textContent = '';
+  if (q.ok === false) {
+    box.appendChild(el('div', 'note note-danger', `Quota unavailable: ${capText(q.error) || 'the provider did not answer'}`));
+    return;
+  }
+  const windows = Array.isArray(q.windows) ? q.windows : [];
+  if (!windows.length) {
+    box.appendChild(el('div', 'note', 'No quota windows reported.'));
+    return;
+  }
+  for (const entry of windows) {
+    if (entry && typeof entry === 'object' && typeof entry.model === 'string' && entry.model) {
+      box.appendChild(el('div', 'note', entry.model));
+    }
+    for (const w of capWindowsOf(entry)) {
+      const pct = num(w.win.remainingPercent, 0);
+      const row = capBar(capText(w.win.label) || w.key, `resets in ${capSpan(w.win.resetsInMs)}`, pct, capLeftTone(pct));
+      box.appendChild(row);
+      if (num(w.win.totalCount) > 0) {
+        box.appendChild(el('div', 'note', `${num(w.win.usageCount)} of ${num(w.win.totalCount)} used in this window`));
+      }
+    }
+  }
+}
+
+/* ---- Fetch, render, refresh ---- */
+function renderCapacity(d) {
+  renderCapHealth(d);
+  renderCapHost(d);
+  renderCapHierarchy(d);
+  renderCapPlan(d);
+  renderCapQuota(d);
+}
+let capTimer = null;
+let capBusy = false;
+let capLastOkAt = 0;
+function capSetError(msg) {
+  const box = document.getElementById('capError');
+  const grid = document.getElementById('capGrid');
+  if (box) {
+    box.textContent = msg || '';
+    box.hidden = !msg;
+  }
+  if (grid) grid.classList.toggle('is-stale', !!msg);
+}
+function capSetUpdated() {
+  const stamp = document.getElementById('capUpdated');
+  if (!stamp) return;
+  stamp.textContent = capLastOkAt ? new Date(capLastOkAt).toLocaleTimeString() : 'never';
+}
+async function refreshCapacity() {
+  if (capBusy) return;
+  capBusy = true;
+  const btn = document.getElementById('capRefresh');
+  if (btn) btn.disabled = true;
+  try {
+    const res = await fetch(CAP_URL, { cache: 'no-store' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (!data || typeof data !== 'object') throw new Error('the engine sent no data');
+    if (data.ok === false) throw new Error(capText(data.error) || 'the engine refused the read');
+    capLastOkAt = Date.now();
+    renderCapacity(data);
+    capSetError(null);
+  } catch (err) {
+    const why = (err && err.message) ? err.message : String(err);
+    const stale = capLastOkAt ? ` — the figures below are from ${new Date(capLastOkAt).toLocaleTimeString()}` : '';
+    capSetError(`Capacity read failed: ${why}${stale}`);
+  } finally {
+    capBusy = false;
+    if (btn) btn.disabled = false;
+    capSetUpdated();
+  }
+}
+function capStart() {
+  if (capTimer || document.hidden) return;
+  capTimer = setInterval(refreshCapacity, CAP_REFRESH_MS);
+}
+function capStop() {
+  if (!capTimer) return;
+  clearInterval(capTimer);
+  capTimer = null;
+}
+const capRefreshBtn = document.getElementById('capRefresh');
+if (capRefreshBtn) capRefreshBtn.addEventListener('click', refreshCapacity);
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) capStop();
+  else { capStart(); refreshCapacity(); }
 });
+refreshCapacity();
+capStart();
 </script>
 
 <div id="menu-popup" class="popup">
