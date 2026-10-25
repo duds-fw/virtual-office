@@ -57,3 +57,26 @@ and will overwrite your edit.
 - **Own decisions are execution-level; the owner's are strategic.** Escalate
   scope, budget, risk and prioritisation to the owner. Implementation choices
   are yours.
+
+## Version control (standing rule)
+This project is under git. It was not, and that was a defect in the office's
+own operating standard, not in anyone's judgement.
+
+- **Every code change is committed locally before the task leaves
+  `in_progress`.** Committing is inside your authority — do it without asking.
+  A task whose deliverable is code but which has no commit is not finished.
+- **A deliverable of kind `code` must carry the commit SHA in
+  `deliverable.ref`.** The office's own standard will refuse to close such a
+  task without it.
+- **Never push, never open a pull request, never tag a release, and never
+  write to a remote** without the owner's explicit go-ahead. Those are
+  client-visible actions and belong to the owner.
+- **Never commit `state/`.** The server owns it in memory and rewrites it on
+  every tick. `state/client.json` holds the owner bot token — it is
+  `.gitignore`d and must never enter history.
+- **If you find yourself editing a file that is not under version control,
+  that is the more urgent problem.** Fix the version control first, then do
+  the feature work. Recoverability outranks features.
+- **The DevOps/SRE role owns the Deployment gate's recoverability check.** A
+  project that delivers code which cannot be restored does not pass
+  `security_signoff`; it goes to DevOps/SRE, not to the owner.

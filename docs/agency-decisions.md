@@ -92,3 +92,42 @@ Owner answer (05:50): *"Full per-role identities; client loop moves to Sprint 3.
 - **L1 escalation `esc_3x4l80` closed — the PO's position ratified by the Orchestrator on the PO's behalf (2026-10-25).** `task_hkq6yi` re-scoped to option (a): integrate the office's own `GET /api/agency/state` as the sprint-board source. Option (b) would be a client scope/spend decision and (c) would remove sprint content, so (a) is the only option inside the office's authority. 4h, moved into the active sprint, ready for `se`.
 - **Delivered this sprint:** `task_57nctj` — escalation panel in the office UI (level · owner · age), built from `docs/design-escalation-panel.md`; `task_u0ngcb` — `POST /api/agency/escalation/:id/resolve` + the `resolvedAt` writer (live; the state payload now carries resolved rows so the panel's "Resolved (N)" section can populate); `task_21zt3o` — `docs/design-api-identity.md`, the per-role identity spec the hardening tasks implement (12 acceptance criteria); `task_rbci45` — status vocabulary, gate-checked completion, domain input validation (F-03, F-12, F-13, F-14, F-20); `task_lkc16h` — prompt sanitisation for the autonomy tick and `/api/orchestrate/goal` (F-04, F-05). The rules harness is green at 69 checks.
 - **Completion path after F-03:** `setTaskStatus('done')` now refuses a task whose phase gate is unapproved (F-03), so a Development task completes as *advance → Review → done* — the review's own sanctioned route — instead of a direct status write. `design_approval` stays an entry gate, not a completion gate, for tasks created directly in Development.
+
+## D6 — Is the office's own code under version control? → **Yes. It was not, and that was a gap in the standard.**
+
+Recorded 2026-10-25. The Virtual Office — 3,879 lines across 8 modules, 15 tasks
+done across Sprints 1 and 2 — existed only on disk. No git repository, no history,
+no way to revert a bad edit, no way to see what changed between two states of the
+board. A `.gitignore` containing `.database-mcp/` was present, carried over from an
+unrelated repo, which shows the omission was inherited rather than deliberate.
+
+**Why the office did not catch it.** Not a judgement failure — a missing standard.
+The board's definition of done was estimate + role + phase + gate. `task.deliverable`
+did not exist, so "what did you produce" had no field to answer with. Nothing in
+`AGENTS.md` required code to be recoverable. The security review (`docs/agency-security-review.md`)
+examined path traversal, authentication and prompt injection — the *quality* of the
+artefact — and no review examined the *durability* of the artefact. There was also no
+incident to make the risk visible: nothing had been lost yet, and the absence of an
+incident felt like the absence of a risk.
+
+**Resolution — three changes, in the place that makes them standing rules rather
+than reminders:**
+
+1. **The project is now under git**, with `state/` and `state/client.json` (the owner
+   bot token) excluded. First commit `c2ff93c`; remote `duds-fw/virtual-office`.
+2. **`AGENTS.md` gains a "Version control (standing rule)" section.** Committing
+   locally is inside any role's authority and must not be asked for. Pushing, opening
+   a pull request and tagging a release are client-visible and stay with the owner.
+3. **Two board tasks make it structural, not documentary:**
+   - *Standards: add a `deliverable.ref` check for code tasks* (se, 3h) — a `code`
+     deliverable must carry a commit SHA; `setTaskStatus('done')` refuses without it
+     (invariant P3).
+   - *Gate: a code deliverable must be recoverable before Deployment opens*
+     (dso, 4h) — the Deployment gate also checks that `deliverable.ref` resolves to a
+     real commit and that the delivered files have no uncommitted changes.
+
+**The escape hatch is not the answer.** A missing engineering standard must not be
+resolved by asking the owner to make the call each time — that builds a company
+which needs its founder for every judgement. The owner is consulted for strategic
+forks (scope, budget, risk, priority); recoverability is an engineering standard,
+and DevOps/SRE owns it. The office now has the standard and the enforcement.
