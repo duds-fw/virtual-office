@@ -150,6 +150,29 @@ function prober(table) {
     check('the office falls through to the route that can serve', !!m && m.key === PAID_KEY, JSON.stringify(m));
   }
 
+  console.log('--- a provider that refuses mid-ladder is not probed again ---');
+  {
+    router.resetState();
+    const provider = FREE_KEY.split('/')[0];
+    const calls = [];
+    const p = async (c) => {
+      calls.push(c.key);
+      if (c.key === FREE_KEY) {
+        // The real prober reports a quota refusal this way.
+        router.noteRefusal(c.key, 'Free usage limit reached. Connect a provider to keep going.');
+        router.simulateOutcome(c.key, { healthy: false, lastChecked: Date.now(), lastError: 'usage limit reached' });
+        return { ...c, healthy: false };
+      }
+      router.simulateOutcome(c.key, { healthy: true, lastChecked: Date.now(), lastError: null });
+      return { ...c, healthy: true };
+    };
+    const m = await router.selectModel({ probeFn: p });
+    check('the paid route is chosen', !!m && m.key === PAID_KEY, JSON.stringify(m));
+    check('the dead provider is not probed again',
+      !calls.some((k) => k !== FREE_KEY && k.split('/')[0] === provider), calls.join(','));
+    check('the paid route was probed', calls.includes(PAID_KEY), calls.join(','));
+  }
+
   console.log('--- a refusal that is not about quota does not exhaust the provider ---');
   {
     router.resetState();

@@ -200,6 +200,11 @@ async function selectModel({ probe = true, probeFn = null } = {}) {
   const deadline = nowTs + PROBE_TOTAL_BUDGET_MS;
 
   for (const c of ordered) {
+    // A provider that refused mid-ladder takes its other models with it:
+    // the quota belongs to the account. Probing them again is the same call
+    // to the same dead account, and it spends the budget the paid fallback
+    // needs.
+    if (c.exhaustedUntil > now()) continue;
     if (c.healthy === false && nowTs - c.lastChecked < COOLDOWN_MS) continue;
     if (!probe && c.healthy === true) {
       state.active = c.key;
@@ -211,12 +216,17 @@ async function selectModel({ probe = true, probeFn = null } = {}) {
       state.active = c.key;
       return { ...c, degraded: !MODEL_POLICY.free.includes(c.key), trusted: true };
     }
-    const r = await (probeFn || probeCandidate)(c, { deadline });
+    // The paid fallback gets its own budget. The free models may spend the
+    // whole probe window; if they do, the one route that can still serve must
+    // still be tried, or the office sits blind next to a working route.
+    const paid = !MODEL_POLICY.free.includes(c.key);
+    const probeDeadline = paid ? now() + PROBE_TOTAL_BUDGET_MS : deadline;
+    const r = await (probeFn || probeCandidate)(c, { deadline: probeDeadline });
     if (r.healthy) {
       state.active = r.key;
       return { ...r, degraded: !MODEL_POLICY.free.includes(r.key) };
     }
-    if (Date.now() > deadline) break;
+    if (Date.now() > deadline && !paid) break;
   }
 
   // Last resort: the ladder could not be verified inside the budget. Rather
