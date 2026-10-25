@@ -16,6 +16,7 @@ const workQueue = require('./work-queue');
 const briefing = require('./briefing');
 const tokenSavings = require('./token-savings');
 const capacity = require('./capacity');
+const journal = require('./activity-journal');
 
 const STATE_DIR = path.join(__dirname, 'state');
 const AUTONOMY_KILL_FILE = path.join(__dirname, '.autonomy_stop');
@@ -23,7 +24,6 @@ const RUNS_FILE = path.join(STATE_DIR, 'runs.json');
 const PROJECTS_FILE = path.join(STATE_DIR, 'projects.json');
 const USAGE_FILE = path.join(STATE_DIR, 'usage.json');
 const AUTOPILOT_SESSION_FILE = path.join(STATE_DIR, 'autopilot_session.json');
-const DELEGATIONS_FILE = path.join(STATE_DIR, 'delegations.json');
 
 if (!fs.existsSync(STATE_DIR)) fs.mkdirSync(STATE_DIR, { recursive: true });
 
@@ -393,6 +393,11 @@ async function runAutonomyTick({ fromQueue = false } = {}) {
     const tb = await checkTokenBudget();
     if (!tb.allowed && !fromQueue) {
       recordAutonomyRefusal(autonomyUsage, 'daily_token_budget', consumer, { name: 'dailyTokenBudget', value: tb.spentToday, max: tb.budget });
+      noteBudgetExhausted('daily_tokens', {
+        text: `daily token budget exhausted: ${tb.spentToday.toLocaleString()} of ${tb.budget.toLocaleString()}`,
+        spent: tb.spentToday,
+        budget: tb.budget,
+      });
       saveUsage();
       console.log(`[autonomy] tick skipped: daily_token_budget (${tb.spentToday}/${tb.budget})`);
       return { ok: false, reason: 'daily_token_budget', spentToday: tb.spentToday, budget: tb.budget };
@@ -513,10 +518,12 @@ async function runAutonomyTick({ fromQueue = false } = {}) {
       saveUsage();
 
       const args = ['api', 'session.prompt', '--param', `sessionID=${sessionID}`, '--data', JSON.stringify({ text: tickPrompt })];
+      noteDelegation('opened', { sessionID, model: model.key, kind: 'autopilot_tick' });
       execFile(OPENCODE_BIN, args, { cwd: '/home/opencode', timeout: 180000 }, async (err, stdout, stderr) => {
         if (err) {
           const msg = (stderr || err.message || '').slice(0, 240);
           console.error('[autonomy] tick error:', msg);
+          noteDelegation('closed', { sessionID, outcome: 'failed', detail: msg.slice(0, 120) });
           router.recordOutcome(model.key, false, msg);
           if (router.isQuotaError(msg)) {
             const queued = workQueue.enqueue({ kind: 'autopilot_tick', reason: `provider exhausted: ${msg.slice(0, 120)}` });
@@ -534,6 +541,7 @@ async function runAutonomyTick({ fromQueue = false } = {}) {
           return;
         }
         router.recordOutcome(model.key, true);
+        noteDelegation('closed', { sessionID, outcome: 'served', model: model.key });
         console.log(`[autonomy] tick served by ${model.key}`);
         // Something may have crossed a threshold only the owner can authorise.
         await checkAuthority();
@@ -658,113 +666,32 @@ function phaseFromText(text = '') {
 }
 
 /**
- * The OpenCode message API only exposes a sliding window of recent messages, so
- * re-reading it each poll would drop older delegations. Keep a durable ledger
- * on disk and merge newly seen entries into it.
- */
-let delegationLedger = [];
-
-function loadDelegations() {
-  try {
-    if (fs.existsSync(DELEGATIONS_FILE)) {
-      const parsed = JSON.parse(fs.readFileSync(DELEGATIONS_FILE, 'utf8'));
-      if (Array.isArray(parsed)) delegationLedger = parsed;
-    }
-  } catch (e) { /* start with an empty ledger */ }
-}
-
-function saveDelegations() {
-  try { fs.writeFileSync(DELEGATIONS_FILE, JSON.stringify(delegationLedger, null, 2)); } catch (e) {}
-}
-
-function mergeDelegations(fresh) {
-  loadDelegations();
-  const seen = new Set(delegationLedger.map((d) => d.id));
-  let added = 0;
-  for (const d of fresh) {
-    if (seen.has(d.id)) continue;
-    delegationLedger.unshift(d);
-    seen.add(d.id);
-    added++;
-  }
-  if (added) {
-    delegationLedger.sort((a, b) => b.time - a.time);
-    if (delegationLedger.length > 300) delegationLedger.length = 300;
-    saveDelegations();
-  }
-  return delegationLedger;
-}
-
-/**
- * Extract subagent tool calls from message payloads without keeping the
- * message bodies. The office only needs "who was delegated to, and with what
- * description" — the full assistant text is thousands of tokens per message
- * and is never read by anything here.
- */
-function extractDelegations(msgs) {
-  const out = [];
-  for (const m of msgs) {
-    const parts = Array.isArray(m.content) ? m.content : (Array.isArray(m.parts) ? m.parts : []);
-    for (const p of parts) {
-      if (!p || p.type !== 'tool') continue;
-      const toolName = p.name || p.tool;
-      if (toolName !== 'subagent' && toolName !== 'task') continue;
-      const input = (p.state && p.state.input) || p.input || {};
-      const agent = input.agent || input.subagent_type || input.subagentType;
-      if (!agent) continue;
-      out.push({
-        id: `${m.id}:${p.id || toolName}`,
-        time: (m.time && m.time.created) || Date.now(),
-        subagent: agent,
-        description: typeof input.description === 'string' ? input.description.slice(0, 140) : '',
-        status: (p.state && p.state.status) || 'unknown',
-      });
-    }
-  }
-  return out;
-}
-
-/**
- * Fetch recent session messages.
+ * Subagents the office has seen.
  *
- * The CLI truncates stdout when the response is large, and the failure is
- * flaky (the same limit can succeed or fail between runs), so we retry with a
- * smaller window until the JSON parses.
+ * A child session is a subagent the engine spawned. The office records the
+ * spawn when it sees it, so the journal carries the event instead of a
+ * transcript being scraped for it later (D9.3).
  */
-async function fetchSessionMessages(sessionID) {
-  const limits = [40, 20, 10];
-  for (const limit of limits) {
-    for (let attempt = 0; attempt < 2; attempt++) {
-      try {
-        const raw = await runOpenCode(['api', 'session.message.list', '--param', `sessionID=${sessionID}`, '--param', `limit=${limit}`]);
-        const parsed = JSON.parse(raw);
-        const msgs = Array.isArray(parsed) ? parsed : (Array.isArray(parsed.data) ? parsed.data : []);
-        if (msgs.length) return msgs;
-      } catch (e) {
-        // truncated or malformed — retry with a smaller window
-      }
-    }
-  }
-  return [];
-}
+const seenSubagents = new Set(
+  journal.read()
+    .filter((e) => e.type === journal.EVENT.SUBAGENT_SPAWNED && e.sessionId)
+    .map((e) => e.sessionId),
+);
 
-/**
- * Sessions the office watches for real agent activity.
- * The human's live session plus the autopilot session — the autopilot runs in
- * its own session, so watching only one would hide every delegation the
- * autonomous agents make.
- */
-function watchedSessionIDs() {
-  const ids = new Set();
-  const active = process.env.ACTIVE_SESSION_ID || 'ses_e974f9b88ffeodUJEaNJHwlwsM';
-  if (active) ids.add(active);
-  try {
-    if (fs.existsSync(AUTOPILOT_SESSION_FILE)) {
-      const saved = JSON.parse(fs.readFileSync(AUTOPILOT_SESSION_FILE, 'utf8'));
-      if (saved && saved.sessionID) ids.add(saved.sessionID);
-    }
-  } catch (e) { /* autopilot session not created yet */ }
-  return [...ids];
+function noteSubagents(sessions) {
+  for (const s of sessions) {
+    if (!s || !s.parentID || !s.id) continue;
+    if (seenSubagents.has(s.id)) continue;
+    seenSubagents.add(s.id);
+    const agent = s.agent || 'subagent';
+    journal.append(journal.EVENT.SUBAGENT_SPAWNED, {
+      who: agent,
+      text: `${agent} spawned for "${(s.title || s.id).slice(0, 120)}"`,
+      sessionId: s.id,
+      parent: s.parentID,
+      agent,
+    });
+  }
 }
 
 /**
@@ -1118,10 +1045,55 @@ async function detectProviderHealth() {
         quota = true;
       }
     }
+    noteProviderHealth(!quota);
     return { ok: !quota, quotaExhausted: quota };
   } catch (e) {
     return { ok: false, quotaExhausted: false, error: e.message };
   }
+}
+
+/**
+ * Record a delegation opening or closing.
+ *
+ * The office opens a delegation when it hands work to an agent and closes it
+ * when the work comes back. Both are written when they happen, so the journal
+ * carries the life of the work rather than a later reconstruction of it.
+ */
+function noteDelegation(kind, payload = {}) {
+  const opened = kind === 'opened';
+  journal.append(opened ? journal.EVENT.DELEGATION_OPENED : journal.EVENT.DELEGATION_CLOSED, {
+    who: 'Orchestrator',
+    text: opened
+      ? `delegation opened on ${payload.sessionID} (${payload.model || 'session'})`
+      : `delegation closed on ${payload.sessionID} (${payload.outcome || 'done'})`,
+    ...payload,
+  });
+}
+
+/** Record that a budget ran out. */
+function noteBudgetExhausted(scope, payload = {}) {
+  journal.append(journal.EVENT.BUDGET_EXHAUSTED, {
+    who: 'Orchestrator',
+    text: payload.text || `budget exhausted: ${scope}`,
+    scope,
+    ...payload,
+  });
+}
+
+/**
+ * Record a change in the provider's health, not every observation of it.
+ * The office is blind while the provider refuses; the journal says when that
+ * started and when it ended.
+ */
+let providerHealthy = null;
+function noteProviderHealth(ok) {
+  if (providerHealthy === ok) return;
+  providerHealthy = ok;
+  journal.append(ok ? journal.EVENT.PROVIDER_RECOVERED : journal.EVENT.PROVIDER_UNHEALTHY, {
+    who: 'Provider',
+    text: ok ? 'provider is serving again' : 'provider refused work: usage limit reached',
+    provider: 'model',
+  });
 }
 
 /**
@@ -1134,6 +1106,7 @@ async function reapStuckSubagents() {
     const parsed = JSON.parse(raw);
     const sessions = parsed.data || [];
     const byId = new Map(sessions.map((s) => [s.id, s]));
+    noteSubagents(sessions);
     const stuck = [];
     for (const s of sessions) {
       if (!s.parentID || s.outcome) continue;               // only unfinished children
@@ -1141,6 +1114,13 @@ async function reapStuckSubagents() {
       if (!parent) continue;
       if (parent.outcome === 'failed' || parent.outcome === 'interrupted') {
         stuck.push({ id: s.id, title: s.title, agent: s.agent, parent: parent.title });
+        journal.append(journal.EVENT.SUBAGENT_REAPED, {
+          who: 'Orchestrator',
+          text: `reaped stuck subagent ${s.agent || 'subagent'} (${s.id}) - parent ${parent.title || parent.id}`,
+          sessionId: s.id,
+          agent: s.agent || null,
+          parent: s.parentID,
+        });
       }
     }
     return stuck;
@@ -1229,24 +1209,10 @@ async function fetchLiveData() {
   const now = Date.now();
   if (liveCache.data && now - liveCache.ts < 4000) return liveCache.data;
   try {
-    const sessionIDs = watchedSessionIDs();
-    const [sessions, ...msgResults] = await Promise.allSettled([
-      fetchSessions(),
-      ...sessionIDs.map((id) => fetchSessionMessages(id)),
-    ]);
-    const sessList = sessions.status === 'fulfilled' ? sessions.value : [];
-    const msgs = msgResults.flatMap((r) => (r.status === 'fulfilled' ? r.value : []));
-
-    // Delegations live in message.content[] as { type:'tool', name:'subagent', state:{...} }
-    // The message API returns only a sliding window, so we merge into a durable
-    // ledger keyed by message+tool id instead of re-deriving the full history.
-    const fresh = extractDelegations(msgs);
-    const delegations = mergeDelegations(fresh);
-
-    const textOf = (m) => {
-      const parts = Array.isArray(m.content) ? m.content : (Array.isArray(m.parts) ? m.parts : []);
-      return parts.filter((pp) => pp && pp.type === 'text' && pp.text).map((pp) => pp.text).join(' ').slice(0, 200);
-    };
+    // The office reads its own journal for what it did; it never reconstructs
+    // activity from a chat transcript (D9.3).
+    const sessions = await fetchSessions();
+    const sessList = Array.isArray(sessions) ? sessions : [];
 
     const data = {
       connected: true,
@@ -1257,10 +1223,6 @@ async function fetchLiveData() {
         outcome: s.outcome || null,
         updated: (s.time && s.time.updated) || s.updated || null,
       })) : [],
-      // Only a short tail of message text is exposed — the office UI shows
-      // activity, not transcripts. Full bodies stay out of the payload.
-      messages: msgs.slice(-12).map((m) => ({ id: m.id, role: m.type || (m.info && m.info.role) || 'unknown', text: textOf(m) })),
-      delegations: delegations.slice(0, 40),
       activeRun: goalRuns[0] || null,
       agency: agency.state(),
       tokens: await checkTokenBudget(),
@@ -1273,7 +1235,7 @@ async function fetchLiveData() {
     return data;
   } catch (e) {
     liveCache = { ts: now, data: null, error: e.message };
-    return { connected: false, error: e.message, activeRun: goalRuns[0] || null, agency: agency.state(), delegations: [], ts: now };
+    return { connected: false, error: e.message, activeRun: goalRuns[0] || null, agency: agency.state(), ts: now };
   }
 }
 
@@ -1344,6 +1306,7 @@ const server = http.createServer(async (req, res) => {
       const args = ['api', 'session.prompt', '--param', `sessionID=${sessionID}`, '--data', JSON.stringify({ text: prompt })];
       const rec = { runID, goal, description, sessionID, status: 'started', phase: phaseFromText(goal), createdAt: Date.now() };
       goalRuns.unshift(rec);
+      noteDelegation('opened', { sessionID, model: 'active session', kind: 'goal', runID });
       while (goalRuns.length > 50) goalRuns.pop();
       saveRuns();
       runOpenCode(args).catch((e) => {
@@ -1542,6 +1505,14 @@ const server = http.createServer(async (req, res) => {
       allowed: tb.allowed,
       usage: tb.usage,
     }));
+  }
+
+  if (pathname === '/api/agency/activity' && req.method === 'GET') {
+    // The engine's own record of what it did, in the order it did it.
+    // It is a snapshot of the journal, not a projection of a transcript.
+    const entries = journal.read();
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-cache' });
+    return res.end(JSON.stringify({ entries, count: entries.length }));
   }
 
   if (pathname === '/api/agency/vocabulary' && req.method === 'GET') {
@@ -1881,4 +1852,8 @@ module.exports = {
   recordAutonomyRefusal,
   migrateAutonomyUsage,
   tokenBudgetDecision,
+  noteDelegation,
+  noteBudgetExhausted,
+  noteProviderHealth,
+  noteSubagents,
 };

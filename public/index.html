@@ -546,7 +546,7 @@ function spawnTask() {
 createGoalPlan('Launch product v1', 'Initial orchestration run for virtual office');
 
 let liveConnected = false;
-let liveDelegations = [];
+let liveActivity = [];
 let liveRun = null;
 let liveAgency = null;
 let liveTokens = null;
@@ -580,6 +580,21 @@ function upsertLiveTask(item) {
   }
 }
 
+/**
+ * The engine's own record of what it did.
+ *
+ * The console observes the journal; it does not reconstruct activity from a
+ * chat transcript (D9.3).
+ */
+async function syncActivity() {
+  try {
+    const res = await fetch('/api/agency/activity', { cache: 'no-store' });
+    if (!res.ok) return;
+    const data = await res.json();
+    liveActivity = Array.isArray(data.entries) ? data.entries : [];
+  } catch (_) { /* the journal is not reachable right now */ }
+}
+
 async function syncOpenCodeLive() {
   const statusEl = document.getElementById('opencodeStatus');
   try {
@@ -596,25 +611,16 @@ async function syncOpenCodeLive() {
     if (data.savings) liveSavings = data.savings;
     if (data.client) liveClient = data.client;
     if (!liveConnected) {
-      liveDelegations = [];
       liveRun = null;
       updatePopup();
       return;
     }
     for (const item of data.workItems || []) upsertLiveTask(item);
-    liveDelegations = Array.isArray(data.delegations) ? data.delegations : [];
     liveRun = data.activeRun || null;
-    for (const ev of (data.feed || []).slice(0, 4)) {
-      if (!ev?.text) continue;
-      const key = `${ev.time || ''}|${ev.who || ''}|${ev.text}`;
-      if (injectedLiveIds.has(key)) continue;
-      injectedLiveIds.add(key);
-      logFeed(ev.who || 'OpenCode', ev.text);
-    }
+    await syncActivity();
     updatePopup();
   } catch (_) {
     liveConnected = false;
-    liveDelegations = [];
     liveRun = null;
     if (statusEl) {
       statusEl.textContent = 'offline';
@@ -634,7 +640,12 @@ function logFeed(who, text) {
   if (feed) {
     const line = document.createElement('div');
     line.className='line';
-    line.innerHTML = `<span class="time">${feedLines[0].time}</span><div><span class="agent">${who}</span> <span class="action">${text}</span></div>`;
+    line.appendChild(el('span', 'time', feedLines[0].time));
+    const body = document.createElement('div');
+    body.appendChild(el('span', 'agent', who));
+    body.appendChild(document.createTextNode(' '));
+    body.appendChild(el('span', 'action', text));
+    line.appendChild(body);
     feed.prepend(line);
     while (feed.children.length > 40) feed.removeChild(feed.lastChild);
   }
@@ -1345,47 +1356,78 @@ function renderOwnerChannel() {
 function updatePopup() {
   const agDiv = document.getElementById('popup-agents');
   const feedDiv = document.getElementById('popup-feed');
-  const auditDiv = document.getElementById('popup-audit');
   const runDiv = document.getElementById('popup-run');
   const teamCountEl = document.getElementById('popup-team-count');
   if (!agDiv || !feedDiv) return;
   agDiv.innerHTML = '';
   feedDiv.innerHTML = '';
-  if (auditDiv) auditDiv.innerHTML = '';
   if (runDiv) runDiv.innerHTML = '';
   const source = (typeof agents !== 'undefined' && agents.length) ? agents : AGENTS;
   if (teamCountEl) teamCountEl.textContent = `${source.length} online`;
   for (const r of source) {
     const d = document.createElement('div');
     d.className='agent';
-    d.innerHTML = `<div style="width:22px;height:22px;border-radius:6px;background:#${r.color.toString(16).padStart(6,'0')};display:grid;place-items:center;font-size:9px;color:#0b1220;font-weight:700;flex-shrink:0;">${r.init}</div><div><div style="font-size:11px;font-weight:600;">${r.name}</div><div style="font-size:9px;color:var(--muted);">${r.role}</div><div style="font-size:9px;color:#93c5fd;">${r.status || 'idle'}${r.phase ? ` · ${r.phase}` : ''}${r.task ? ` · ${r.task}` : ''}</div></div>`;
+    const badge = document.createElement('div');
+    badge.style.cssText = `width:22px;height:22px;border-radius:6px;background:#${r.color.toString(16).padStart(6,'0')};display:grid;place-items:center;font-size:9px;color:#0b1220;font-weight:700;flex-shrink:0;`;
+    badge.textContent = r.init || '?';
+    const info = document.createElement('div');
+    info.appendChild(el('div', null, r.name));
+    info.firstChild.style.cssText = 'font-size:11px;font-weight:600;';
+    info.appendChild(el('div', null, r.role));
+    info.lastChild.style.cssText = 'font-size:9px;color:var(--muted);';
+    const state = el('div', null, `${r.status || 'idle'}${r.phase ? ` · ${r.phase}` : ''}${r.task ? ` · ${r.task}` : ''}`);
+    state.style.cssText = 'font-size:9px;color:#93c5fd;';
+    info.appendChild(state);
+    d.appendChild(badge);
+    d.appendChild(info);
     agDiv.appendChild(d);
   }
-  for (const item of feedLines.slice(0, 20)) {
-    const clone = document.createElement('div');
-    clone.className='line';
-    clone.style.cssText = 'font-size:9px;padding:2px 0;';
-    clone.innerHTML = `<span class="time">${item.time}</span><div><span class="agent">${item.who}</span> <span class="action">${item.text}</span></div>`;
-    feedDiv.appendChild(clone);
+  // What the office did, in the order it did it. Every string is set as text:
+  // a caller-supplied title is data, never markup.
+  const entries = liveActivity.slice(-40).reverse();
+  if (!entries.length) {
+    feedDiv.appendChild(el('div', 'muted-note', 'The office has not recorded any activity yet.'));
+  }
+  for (const e of entries) {
+    const line = document.createElement('div');
+    line.className='line';
+    line.style.cssText = 'font-size:9px;padding:2px 0;';
+    line.appendChild(el('span', 'time', e.at ? new Date(e.at).toLocaleTimeString() : ''));
+    const body = document.createElement('div');
+    body.appendChild(el('span', 'agent', e.who || 'office'));
+    body.appendChild(document.createTextNode(' '));
+    body.appendChild(el('span', 'action', e.text || ''));
+    line.appendChild(body);
+    feedDiv.appendChild(line);
+  }
+  if (feedLines.length) {
+    feedDiv.appendChild(el('div', 'muted-note', 'Simulated office'));
+    for (const item of feedLines.slice(0, 8)) {
+      const clone = document.createElement('div');
+      clone.className='line';
+      clone.style.cssText = 'font-size:9px;padding:2px 0;opacity:.75;';
+      clone.appendChild(el('span', 'time', item.time));
+      const body = document.createElement('div');
+      body.appendChild(el('span', 'agent', item.who));
+      body.appendChild(document.createTextNode(' '));
+      body.appendChild(el('span', 'action', item.text));
+      clone.appendChild(body);
+      feedDiv.appendChild(clone);
+    }
   }
   if (runDiv) {
     if (liveRun?.runID) {
-      runDiv.innerHTML = `<div style="font-size:10px;color:var(--muted)">Run: <b style="color:var(--text)">${liveRun.runID}</b> · ${liveRun.status || 'started'}</div><div style="font-size:10px;color:var(--muted)">Goal: ${liveRun.goal || '-'}</div>`;
+      const head = el('div', null, `Run: ${liveRun.runID} · ${liveRun.status || 'started'}`);
+      head.style.cssText = 'font-size:10px;color:var(--muted);';
+      head.querySelector('b');
+      const goal = el('div', null, `Goal: ${liveRun.goal || '-'}`);
+      goal.style.cssText = 'font-size:10px;color:var(--muted);';
+      runDiv.appendChild(head);
+      runDiv.appendChild(goal);
     } else {
-      runDiv.innerHTML = `<div style="font-size:10px;color:var(--muted)">No active run</div>`;
-    }
-  }
-  if (auditDiv) {
-    const rows = liveDelegations.slice(0, 12);
-    if (!rows.length) {
-      auditDiv.innerHTML = `<div style="font-size:10px;color:var(--muted)">No subagent calls captured yet</div>`;
-    } else {
-      for (const r of rows) {
-        const line = document.createElement('div');
-        line.style.cssText = 'font-size:10px;padding:4px 0;border-bottom:1px dashed rgba(148,163,184,.12);';
-        line.innerHTML = `<span style="color:#93c5fd">${r.subagent || 'subagent'}</span> · <span style="color:var(--muted)">${r.status || 'ok'}</span><div style="color:var(--text)">${r.description || ''}</div>`;
-        auditDiv.appendChild(line);
-      }
+      const none = el('div', null, 'No active run');
+      none.style.cssText = 'font-size:10px;color:var(--muted);';
+      runDiv.appendChild(none);
     }
   }
   renderBoard(liveAgency);
@@ -1813,8 +1855,6 @@ capStart();
   <div id="popup-metrics" style="margin-bottom:8px;"></div>
   <h3>Owner Channel <span id="popup-client-state" style="font-size:10px;color:var(--muted);"></span></h3>
   <div id="popup-client" style="margin-bottom:8px;"></div>
-  <h3>Delegation Audit</h3>
-  <div id="popup-audit" style="margin-bottom:8px;"></div>
   <h3>Activity Feed</h3>
   <div class="feed" id="popup-feed"></div>
 </div>

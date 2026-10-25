@@ -13,6 +13,7 @@
 const fs = require('fs');
 const path = require('path');
 const pipeline = require('./project-pipeline');
+const journal = require('./activity-journal');
 
 const STATE_DIR = process.env.AGENCY_STATE_DIR || path.join(__dirname, 'state');
 const FILE = path.join(STATE_DIR, 'agency.json');
@@ -268,10 +269,18 @@ function save() {
   }
 }
 
+/**
+ * Record a board change.
+ *
+ * The activity list is the office's working memory and is trimmed to the last
+ * 200 entries. The journal is its permanent record: one line per change,
+ * written as it happens, never rewritten (D9.3).
+ */
 function logActivity(who, text) {
   const d = load();
   d.activity.unshift({ time: Date.now(), who, text });
   if (d.activity.length > 200) d.activity.length = 200;
+  journal.append(journal.EVENT.BOARD, { who, text });
 }
 
 // ------------------------------------------------------------------- helpers
@@ -705,6 +714,13 @@ function assignTask(taskId, agentId) {
   if (tokenState.exhausted) {
     t.status = 'blocked';
     t.blockedReason = `role token budget exhausted: ${t.role} used ${tokenState.used.toLocaleString()} of ${tokenState.capacity.toLocaleString()}`;
+    journal.append(journal.EVENT.BUDGET_EXHAUSTED, {
+      who: 'Orchestrator',
+      text: `budget exhausted: ${t.role} used ${tokenState.used.toLocaleString()} of ${tokenState.capacity.toLocaleString()}`,
+      taskId: t.id,
+      role: t.role,
+      scope: 'role_tokens',
+    });
     recordEscalation(t, `Token budget exhausted for ${t.role}`);
     logActivity('Orchestrator', `blocked "${t.title}": ${t.blockedReason}`);
     save();
@@ -837,6 +853,13 @@ function resolveEscalation(id, reason) {
   e.resolvedAt = Date.now();
   if (note) e.resolution = note;
   logActivity('Orchestrator', `resolved escalation on "${e.taskTitle}"${note ? `: ${note}` : ''}`);
+  journal.append(journal.EVENT.ESCALATION_RESOLVED, {
+    who: 'Orchestrator',
+    text: `escalation resolved on "${e.taskTitle}"${note ? `: ${note}` : ''}`,
+    taskId: e.taskId,
+    escalationId: e.id,
+    note,
+  });
   const entry = d.activity[0];
   if (!save()) {
     // The state file could not be written — the escalation stays open, in
@@ -890,6 +913,12 @@ function setTaskStatus(taskId, status, reason) {
     }
   }
   t.status = status;
+  journal.append(journal.EVENT.TASK_STATUS, {
+    who: 'Orchestrator',
+    text: `"${t.title}" - ${status}`,
+    taskId: t.id,
+    status,
+  });
   if (status === 'in_progress' && !t.startedAt) t.startedAt = Date.now();
   if (status === 'done') {
     // A task completed without going through advanceTask still needs the
@@ -921,6 +950,13 @@ function approveGate(taskId, gateId, role) {
   t.gates[gate.id + '_by'] = role;
   t.gates[gate.id + '_at'] = Date.now();
   logActivity('Orchestrator', `"${t.title}" — ${gate.label} approved by ${role}`);
+  journal.append(journal.EVENT.GATE_APPROVED, {
+    who: role,
+    text: `"${t.title}" — ${gate.label} approved by ${role}`,
+    taskId: t.id,
+    gate: gate.id,
+    role,
+  });
   save();
   return { ok: true, task: t };
 }
@@ -981,6 +1017,14 @@ function recordEscalation(task, reason) {
     existing.owner = step.owner;
     existing.matrixRole = step.matrixRole;
     existing.reason = reason;
+    journal.append(journal.EVENT.ESCALATION_RAISED, {
+      who: 'Orchestrator',
+      text: `escalation raised on "${task.title}": ${reason}`,
+      taskId: task.id,
+      escalationId: existing.id,
+      level,
+      reason,
+    });
   } else {
     d.escalations.unshift({
       id: 'esc_' + Math.random().toString(36).slice(2, 8),
@@ -993,6 +1037,14 @@ function recordEscalation(task, reason) {
       blockedSince,
       createdAt: Date.now(),
       resolvedAt: null,
+    });
+    journal.append(journal.EVENT.ESCALATION_RAISED, {
+      who: 'Orchestrator',
+      text: `escalation raised on "${task.title}": ${reason}`,
+      taskId: task.id,
+      escalationId: d.escalations[0].id,
+      level,
+      reason,
     });
   }
   if (d.escalations.length > 100) d.escalations.length = 100;
