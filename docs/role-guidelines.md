@@ -1,11 +1,11 @@
 # Role & Department Guidelines — duDDev Virtual Office
 
-> **Status: DRAFT — awaiting owner review and ratification.**
-> This document proposes guidelines for every role in the Virtual Office. It is
-> **not** in force until the owner signs the approval sheet in §4.
+> **Status: RATIFIED — in force from 2026-10-26.**
+> The owner ratified these guidelines on 2026-10-26. They are the office's
+> standing per-role guidelines; the approval sheet in §11 is completed.
 >
-> **Applies to roster version:** `agency.js` @ `c2ff93c` (2026-10-25)
-> **Last synced:** 2026-10-25
+> **Applies to roster version:** `agency.js` @ `09fb94d` (2026-10-26)
+> **Last synced:** 2026-10-26
 > **Parent procedure:** `docs/sop-virtual-office.md` — clause IDs (`SOP-x.y`)
 > cited below refer to it.
 > **Authority:** `docs/agency-decisions.md` (owner decisions) >
@@ -1857,13 +1857,13 @@ This document takes effect when the owner ratifies it, together with
 | Design-vs-shipped markers applied | ✅ done |
 | No compliance claims (§17 of the SOP) | ✅ done |
 | Consistency checker written (`tools/sop-consistency-check.js`) | ✅ done |
-| **Owner approval** | ☐ pending |
+| **Owner approval** | ✅ ratified 2026-10-26 |
 
 | Role | Name | Date | Signature |
 |---|---|---|---|
-| Client (owner) | | | |
-| Orchestrator | | | |
+| Client (owner) | owner | 2026-10-26 | ratified in session — task `task_ybbvwd` |
+| Orchestrator | duDDev Virtual Office | 2026-10-26 | recorded in `docs/agency-decisions.md` |
 
-**Ratified on:** ______________  **Effective from:** ______________
+**Ratified on:** 2026-10-26  **Effective from:** 2026-10-26
 
 **Next review:** when a role's roster entry changes, or a gate moves.

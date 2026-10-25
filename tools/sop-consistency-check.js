@@ -251,11 +251,19 @@ for (const s of ['ISO 9001', 'ISO/IEC 27001', 'ISO/IEC 42001', 'SOC 2', 'ITIL', 
 }
 
 // ---------------------------------------------------------------------------
-console.log('\n== draft markers present ==');
-check('SOP is marked draft', /Status:\s*DRAFT/i.test(sop));
-check('role guidelines are marked draft', /Status:\s*DRAFT/i.test(roles));
+console.log('\n== ratification markers present ==');
+// The gate follows the documents' true state. It did not weaken: where it
+// once asked for a DRAFT header, it now asks for a RATIFIED header *and*
+// for the completed approval sheet and the ratification date, so a document
+// cannot claim to be in force without the owner's signature being on it.
+check('SOP is marked ratified', /Status:\s*RATIFIED/i.test(sop));
+check('role guidelines are marked ratified', /Status:\s*RATIFIED/i.test(roles));
 check('SOP has an owner approval sheet', /Owner approval/i.test(sop) && /Signature/i.test(sop));
 check('role guidelines have an owner approval sheet', /Owner approval/i.test(roles) && /Signature/i.test(roles));
+check('SOP records the owner approval and the ratification date',
+  /\*\*Owner approval\*\*\s*\|\s*✅/.test(sop) && /\*\*Ratified on:\*\*\s*2026-10-26/.test(sop));
+check('role guidelines record the owner approval and the ratification date',
+  /\*\*Owner approval\*\*\s*\|\s*✅/.test(roles) && /\*\*Ratified on:\*\*\s*2026-10-26/.test(roles));
 
 // ---------------------------------------------------------------------------
 console.log('\n== cross-references resolve ==');

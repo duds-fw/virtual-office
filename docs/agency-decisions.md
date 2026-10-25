@@ -547,3 +547,32 @@ semantic state to pixels — that is presentation — but it may not own the lis
 `public/index.html` currently hardcodes the task-status map at line 717 and the
 phase-to-room map at lines 260, 317 and 339, with lines 317 and 339 holding the
 same map twice.
+
+## D8 ratified — the SOP and the role guidelines are in force (2026-10-26)
+
+The owner approved the SOP and the role guidelines (task `task_ybbvwd`,
+"Adopt the Virtual Office SOP and role guidelines (owner ratification)").
+D8's standing rule said what happens on ratification; this is that.
+
+- `docs/sop-virtual-office.md` and `docs/role-guidelines.md` are the office's
+  standing procedure from 2026-10-26. Their headers now say RATIFIED and
+  their approval sheets are completed and dated.
+- Precedence is unchanged. `AGENTS.md` and the owner decisions in this file
+  outrank both documents; the two documents outrank `AGENTS.md` only where it
+  is silent.
+- The `[shipped]` / `[designed]` / `[proposed]` markers keep their meaning. A
+  ratified procedure still describes work that is not built — the marker is
+  what says so, and the owner ratified the markers with the rest.
+- No compliance claim is created. The office is not certified against any
+  standard, and §17 of the SOP still says exactly that.
+- The consistency checker no longer asserts that both documents are marked
+  DRAFT. It now asserts RATIFIED together with a completed owner-approval
+  row and the ratification date. The gate did not weaken; it now matches the
+  documents' true state, and a document cannot claim to be in force without
+  the owner's signature being on it.
+
+The ratification is recorded against roster version `agency.js` @ `09fb94d`
+(2026-10-26). The roster changed on the same day: `ui_ux_designer` moved to
+the `frontend` agent, `database_engineer` to `database-engineer`, and the
+five roles that ran through the two unscopable built-in agents moved to
+`scout` and `researcher`.

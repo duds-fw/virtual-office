@@ -1,12 +1,12 @@
 # Standard Operating Procedure — duDDev Virtual Office
 
-> **Status: DRAFT — awaiting owner review and ratification.**
-> This document proposes a procedure. It is **not** in force until the owner
-> signs §19. Until then it supersedes nothing, and the existing
-> `AGENTS.md` + `docs/agency-decisions.md` remain the operative authority.
+> **Status: RATIFIED — in force from 2026-10-26.**
+> The owner ratified this procedure on 2026-10-26. It is the office's
+> standing procedure. It does not outrank `AGENTS.md` or the owner decisions
+> in `docs/agency-decisions.md`, which remain the operative authority.
 >
-> **Applies to roster version:** `agency.js` @ `c2ff93c` (2026-10-25)
-> **Last synced:** 2026-10-25
+> **Applies to roster version:** `agency.js` @ `09fb94d` (2026-10-26)
+> **Last synced:** 2026-10-26
 > **Companion document:** `docs/role-guidelines.md`
 
 ---
@@ -1054,14 +1054,14 @@ approval sheet below is completed.
 | RACI reproduced verbatim from D7.2 | ✅ done |
 | Security gate state stated honestly (§4.6) | ✅ done |
 | Consistency checker written (`tools/sop-consistency-check.js`) | ✅ done |
-| **Owner approval** | ☐ pending |
+| **Owner approval** | ✅ ratified 2026-10-26 |
 
 | Role | Name | Date | Signature |
 |---|---|---|---|
-| Client (owner) | | | |
-| Orchestrator | | | |
+| Client (owner) | owner | 2026-10-26 | ratified in session — task `task_ybbvwd` |
+| Orchestrator | duDDev Virtual Office | 2026-10-26 | recorded in `docs/agency-decisions.md` |
 
-**Ratified on:** ______________  **Effective from:** ______________
+**Ratified on:** 2026-10-26  **Effective from:** 2026-10-26
 
 **Next review:** sprint boundary, or on change to `agency.js` ROSTER / PHASES /
 GATES / STATUSES / ESCALATION_PATH.
