@@ -58,6 +58,39 @@ and will overwrite your edit.
   scope, budget, risk and prioritisation to the owner. Implementation choices
   are yours.
 
+## Project pipeline (standing rule)
+The office runs projects through six stages: **Registration → Triage → Planning →
+Delivery → Acceptance → Done**. The full design is `docs/design-project-pipeline.md`
+and the owner's decisions on it are `docs/agency-decisions.md` §D7. Follow those
+without asking whether they were the intended answers — they were.
+
+- **Responsibility is assigned by RACI** (design doc §2). Exactly one accountable
+  role per stage. The stage owners are: Registration — owner; Triage — Product
+  Owner; Planning — PO + Orchestrator; Delivery — phase-matched roles;
+  Acceptance — QA verifies, Product Owner accepts; Done — Orchestrator.
+- **Acceptance is two acts.** QA marks each criterion `met`/`unmet` against
+  evidence. The Product Owner accepts or requests changes. The owner ratifies
+  only when acceptance would change scope, budget, or accepted risk. **You may
+  not accept your own delivery** — the accepting role must differ from every
+  role that produced the evidence (P7, P8).
+- **Acceptance criteria are a typed binary checklist**, never free text. Each
+  criterion is one falsifiable claim with `met: boolean` and `metBy[]`. If a
+  claim cannot be written as a single sentence that is true or false, it is a
+  goal, not an acceptance criterion — put it in `project.goal` (P2).
+- **A task reaches `done` only with a `deliverable`** naming what it produced
+  (P3). A project reaches `done` only when every criterion is met and every
+  referenced task is done (P4).
+- **The Orchestrator owns the cross-project delivery timeline.** Multiple
+  projects run concurrently and role capacity is shared across them. Sequencing
+  contending work is the Orchestrator's call (P9), not the owner's, unless the
+  contention changes scope, budget, or a committed date.
+- **Do not exceed the project budget.** If the work genuinely needs more hours,
+  raise a report item in the owner's digest with the overrun, the reason and the
+  options. Do not spend the hours.
+- **A missing engineering judgment is yours to make.** The escape hatch is for
+  genuine strategic forks — different business outcomes — not for a decision
+  with a defensible answer. Decide, record the reasoning, and carry it.
+
 ## Version control (standing rule)
 This project is under git. It was not, and that was a defect in the office's
 own operating standard, not in anyone's judgement.

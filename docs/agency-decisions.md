@@ -131,3 +131,86 @@ resolved by asking the owner to make the call each time — that builds a compan
 which needs its founder for every judgement. The owner is consulted for strategic
 forks (scope, budget, risk, priority); recoverability is an engineering standard,
 and DevOps/SRE owns it. The office now has the standard and the enforcement.
+
+## D7 — Owner decisions on the project pipeline (budget, acceptance authority, criteria type, multi-project)
+
+Recorded 2026-10-25. Four strategic questions were open on the pipeline design
+(`docs/design-project-pipeline.md` §10). The owner answered all four. These are
+strategic forks — scope, budget, risk, and client relationship — so they are the
+owner's to decide, and the office records them here so the employees act on the
+answers rather than re-deriving them.
+
+### D7.1 — Budget: strict to 80h
+
+> *"Strict to the budget. I will evaluate if needed to raise. Make it on the
+> report for my decision later."*
+
+The pipeline is cut from 96h to **80h** — no budget increase requested. The cut
+took the 16h from the client-facing surface (C2, D3, D1), because the backend,
+the office behaviour and the hardening tests — 67h — are what make the stages
+real and cannot be cut without producing an office that fails the same ways it
+does today.
+
+**Standing rule:** the office does not exceed the project budget. If the work
+genuinely needs more hours, that becomes a **report item** in the owner's digest,
+carrying the specific overrun, the reason, and the options. It does not become
+an overrun. The owner raises the budget; the office does not.
+
+### D7.2 — Acceptance authority: RACI; the PO accepts, the owner ratifies
+
+> *"Pick the role of how to deliver and what is responsible. Make it in RACI."*
+
+Acceptance splits into two acts:
+
+- **Verification** — QA marks each criterion in the checklist `met`/`unmet`
+  against the recorded evidence. QA produces the verdict; it does not decide.
+- **Acceptance** — the **Product Owner** accepts or requests changes, because the
+  PO wrote the criteria and owns scope.
+- **Ratification** — the owner, and only when acceptance would change scope,
+  budget, or accepted risk. A delivery that meets its checklist unchanged is
+  accepted by the PO and reported as a digest item.
+
+**Invariants P7** (no self-acceptance) and **P8** (only PO or client may accept)
+make this enforceable rather than aspirational.
+
+**Why this is not a weakened standard.** The office does not accept its own
+work — the verifying role and the accepting role are always different roles.
+What changes is *whose attention* is spent, not *whether* anyone checks. If every
+routine delivery required the owner's turn, the owner's attention becomes the
+throughput limit and every employee learns to escalate instead of judge. The
+owner is interrupted only for genuine forks.
+
+### D7.3 — Acceptance criteria: typed binary checklist
+
+> *"Checklist."*
+
+Each criterion is one falsifiable claim with `met: boolean`, `metBy[]`, and
+optional `evidence`. Free text cannot gate a transition; binary can. A criterion
+that cannot be written as a single falsifiable sentence is not an acceptance
+criterion — it is a goal, and belongs in `project.goal`. **P2** enforces
+falsifiability at triage.
+
+### D7.4 — Multi-project: yes; the Orchestrator owns the cross-project timeline
+
+> *"Multiproject. Pick the role for managing the project delivery timeline."*
+
+The office runs **multiple projects concurrently**. The **Orchestrator** owns the
+cross-project delivery timeline: sequencing work against shared role capacity,
+forecasting slips before they become breaches, and deciding which project moves
+first when two contend for the same scarce role. The Product Owner owns the
+timeline *within* one project.
+
+This inverted C2, which assumed a single active project. C2 is cut; its
+sequencing duty now lives in C1 and P9 makes the Orchestrator's sequencing
+explicit. The owner is consulted only when contention changes scope, budget, or
+a committed date.
+
+### Standing rule for the office
+
+These four answers are now the office's standard, not a pending question. Any
+role implementing pipeline work must follow §2 (RACI), §3 (typed checklist), and
+§4 (P1–P9) of `docs/design-project-pipeline.md` without asking whether those
+were the intended answers. If the implementation hits a genuine fork — one where
+the choices have different business outcomes — it escalates through
+`POST /api/client/decision` with the question, the context, and concrete
+options.
